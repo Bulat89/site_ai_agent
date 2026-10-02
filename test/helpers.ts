@@ -1,0 +1,206 @@
+import { pino } from 'pino';
+import type { FastifyInstance } from 'fastify';
+import { buildApp } from '../src/app.js';
+import { loadConfig, type Config } from '../src/config.js';
+import { createServices, type Services } from '../src/services.js';
+import { MemoryStore } from '../src/store/memory.js';
+import type { Store, UserRecord } from '../src/store/types.js';
+import { pkceChallenge, sha256 } from '../src/util/crypto.js';
+
+export const PUBLIC_URL = 'https://site.test';
+export const GOLDFISH_URL = 'https://agent.test';
+export const ADMIN_TOKEN = 'admin-token-0123456789';
+
+export function testConfig(env: Record<string, string> = {}): Config {
+  return loadConfig({
+    NODE_ENV: 'test',
+    PUBLIC_URL,
+    YANDEX_CLIENT_ID: 'ya-client',
+    YANDEX_CLIENT_SECRET: 'ya-secret',
+    YANDEX_OAUTH_URL: 'https://oauth.yandex.test',
+    YANDEX_LOGIN_URL: 'https://login.yandex.test',
+    GOLDFISH_URL,
+    GOLDFISH_ADMIN_TOKEN: ADMIN_TOKEN,
+    ...env,
+  });
+}
+
+export interface YandexProfile {
+  id: string;
+  login?: string;
+  real_name?: string;
+  display_name?: string;
+  default_email?: string;
+  default_avatar_id?: string;
+  is_avatar_empty?: boolean;
+}
+
+/** In-memory Yandex ID (token + info endpoints) and Goldfish admin API behind one fetch. */
+export class Fakes {
+  // Yandex
+  profile: YandexProfile = {
+    id: '1000001',
+    login: 'ivan.petrov',
+    real_name: 'Иван Петров',
+    default_email: 'ivan.petrov@yandex.ru',
+    default_avatar_id: '131652443/abc-123',
+    is_avatar_empty: false,
+  };
+  /** code → PKCE challenge the authorize request carried. */
+  readonly codes = new Map<string, string>();
+  tokenExchangeFails = false;
+
+  // Goldfish
+  readonly clients: Array<{ id: string; name: string }> = [];
+  readonly users = new Map<string, { displayName?: string }>();
+  readonly tokens = new Map<string, { clientId: string; userId: string; revoked: boolean }>();
+  goldfishDown = false;
+  extensionZip: Buffer | null = Buffer.from('PK\u0003\u0004fake-zip');
+  readonly calls: string[] = [];
+  private seq = 0;
+
+  readonly fetch: typeof fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    const method = init?.method ?? 'GET';
+    const headers = new Headers(init?.headers);
+    this.calls.push(`${method} ${url.host}${url.pathname}`);
+    if (url.host === 'oauth.yandex.test') return this.yandexToken(init);
+    if (url.host === 'login.yandex.test') {
+      if (headers.get('authorization') !== 'OAuth ya-access-token')
+        return json({ error: 'unauthorized' }, 401);
+      return json(this.profile);
+    }
+    if (url.host === 'agent.test') return this.goldfish(method, url, headers, init?.body);
+    throw new TypeError(`fetch failed: ${url}`);
+  };
+
+  /** Registers a code as Yandex would after the user approves. */
+  approve(code: string, challenge: string): void {
+    this.codes.set(code, challenge);
+  }
+
+  private yandexToken(init?: RequestInit): Response {
+    const form = new URLSearchParams(String(init?.body ?? ''));
+    const challenge = this.codes.get(form.get('code') ?? '');
+    if (
+      this.tokenExchangeFails ||
+      form.get('grant_type') !== 'authorization_code' ||
+      form.get('client_id') !== 'ya-client' ||
+      form.get('client_secret') !== 'ya-secret' ||
+      !challenge ||
+      pkceChallenge(form.get('code_verifier') ?? '') !== challenge
+    )
+      return json({ error: 'invalid_grant', error_description: 'Code has expired' }, 400);
+    this.codes.delete(form.get('code')!);
+    return json({ token_type: 'bearer', access_token: 'ya-access-token', expires_in: 3600 });
+  }
+
+  private goldfish(method: string, url: URL, headers: Headers, rawBody: unknown): Response {
+    if (this.goldfishDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
+    const path = url.pathname;
+    if (path === '/extension/download') {
+      if (!this.extensionZip) return json({ error: 'not_found' }, 404);
+      return new Response(new Uint8Array(this.extensionZip), {
+        headers: {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="goldfish-extension-0.1.0.zip"',
+        },
+      });
+    }
+    if (headers.get('authorization') !== `Bearer ${ADMIN_TOKEN}`)
+      return json({ error: 'unauthorized' }, 401);
+    const body = rawBody ? JSON.parse(String(rawBody)) : {};
+    let m: RegExpExecArray | null;
+    if (method === 'GET' && path === '/admin/clients') return json(this.clients);
+    if (method === 'POST' && path === '/admin/clients') {
+      const client = { id: `cl_${++this.seq}`, name: body.name };
+      this.clients.push(client);
+      return json(client, 201);
+    }
+    if (method === 'POST' && (m = /^\/admin\/clients\/([^/]+)\/users$/.exec(path))) {
+      const key = `${m[1]}/${body.userId}`;
+      if (this.users.has(key)) return json({ error: 'exists' }, 409);
+      this.users.set(key, { displayName: body.displayName });
+      return json({ userId: body.userId }, 201);
+    }
+    if (method === 'PATCH' && (m = /^\/admin\/users\/([^/]+)\/([^/]+)$/.exec(path))) {
+      const key = `${m[1]}/${decodeURIComponent(m[2]!)}`;
+      const user = this.users.get(key);
+      if (!user) return json({ error: 'not_found' }, 404);
+      Object.assign(user, body);
+      return json(user);
+    }
+    if (method === 'POST' && (m = /^\/admin\/clients\/([^/]+)\/tokens$/.exec(path))) {
+      const id = `tok_${++this.seq}`;
+      this.tokens.set(id, { clientId: m[1]!, userId: body.userId, revoked: false });
+      return json(
+        { token: `gf_secret_${id}`, tokenId: id, clientId: m[1], userId: body.userId },
+        201,
+      );
+    }
+    if (method === 'DELETE' && (m = /^\/admin\/tokens\/([^/]+)$/.exec(path))) {
+      const token = this.tokens.get(m[1]!);
+      if (!token) return new Response(null, { status: 404 });
+      token.revoked = true;
+      return new Response(null, { status: 204 });
+    }
+    return json({ error: 'not_found' }, 404);
+  }
+
+  activeTokens(): string[] {
+    return [...this.tokens].filter(([, t]) => !t.revoked).map(([id]) => id);
+  }
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+export interface TestApp {
+  app: FastifyInstance;
+  services: Services;
+  fakes: Fakes;
+  store: Store;
+}
+
+export async function startApp(
+  env: Record<string, string> = {},
+  store: Store = new MemoryStore(),
+): Promise<TestApp> {
+  const fakes = new Fakes();
+  const services = await createServices(testConfig(env), pino({ level: 'silent' }), {
+    store,
+    fetch: fakes.fetch,
+  });
+  const app = await buildApp(services);
+  await app.ready();
+  return { app, services, fakes, store };
+}
+
+/** Walks the whole Yandex sign-in and returns the session cookie. */
+export async function signIn(t: TestApp): Promise<Record<string, string>> {
+  const start = await t.app.inject('/auth/yandex');
+  const location = new URL(String(start.headers.location));
+  const oauth = start.cookies.find((c) => c.name === t.services.sessions.names.oauth)!;
+  t.fakes.approve('auth-code', location.searchParams.get('code_challenge')!);
+  const callback = await t.app.inject({
+    url: `/auth/yandex/callback?code=auth-code&state=${location.searchParams.get('state')}`,
+    cookies: { [oauth.name]: oauth.value },
+  });
+  const session = callback.cookies.find((c) => c.name === t.services.sessions.names.session);
+  if (!session)
+    throw new Error(`sign-in failed: ${callback.statusCode} ${callback.headers.location}`);
+  return { [session.name]: session.value };
+}
+
+export async function sessionUser(
+  t: TestApp,
+  cookies: Record<string, string>,
+): Promise<UserRecord> {
+  const user = await t.store.sessionUser(sha256(Object.values(cookies)[0]!));
+  if (!user) throw new Error('no session');
+  return user;
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+coverage/
+extension/*.zip
+deploy/screenshots/
+.DS_Store
+*.log

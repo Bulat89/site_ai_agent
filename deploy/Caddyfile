@@ -1,0 +1,5 @@
+# Caddy получает и продлевает сертификат Let's Encrypt для SITE_DOMAIN сам.
+{$SITE_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy site:3000
+}
