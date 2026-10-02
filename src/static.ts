@@ -6,6 +6,9 @@ const FILES: Record<string, string> = {
   'style.css': 'text/css; charset=utf-8',
   'app.js': 'text/javascript; charset=utf-8',
   'favicon.svg': 'image/svg+xml',
+  // Browsers and search crawlers ask for /favicon.ico on their own; Safari ignores SVG icons.
+  'favicon.ico': 'image/x-icon',
+  'apple-touch-icon.png': 'image/png',
 };
 
 export type AssetUrls = Record<keyof typeof FILES, string>;

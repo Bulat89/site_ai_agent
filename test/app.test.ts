@@ -35,6 +35,16 @@ describe('landing page', () => {
     expect(res.headers['cache-control']).toContain('immutable');
   });
 
+  it('serves the favicon at the paths browsers ask for on their own', async () => {
+    t = await startApp();
+    const ico = await t.app.inject('/favicon.ico');
+    expect(ico.statusCode).toBe(200);
+    expect(ico.headers['content-type']).toBe('image/x-icon');
+    const touch = await t.app.inject('/apple-touch-icon.png');
+    expect(touch.statusCode).toBe(200);
+    expect(touch.headers['content-type']).toBe('image/png');
+  });
+
   it('explains a failed sign-in', async () => {
     t = await startApp();
     expect((await t.app.inject('/?login=denied')).body).toContain('Вход отменён');

@@ -48,7 +48,9 @@ function layout(v: View, title: string, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="Goldfish — AI-агент в вашем браузере: ищет и сравнивает данные, заполняет формы и работает в ваших аккаунтах с подтверждением важных действий.">
+<link rel="icon" href="${v.assets['favicon.ico']}" sizes="48x48">
 <link rel="icon" href="${v.assets['favicon.svg']}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="${v.assets['apple-touch-icon.png']}">
 <link rel="stylesheet" href="${v.assets['style.css']}">
 <script src="${v.assets['app.js']}" defer></script>
 </head>
