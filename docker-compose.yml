@@ -1,65 +1,53 @@
-# Сайт на одном сервере (настройки — в .env, см. README):
-#   за своим прокси с TLS (nginx, панель Timeweb):  docker compose up -d
-#   с Caddy и сертификатом Let's Encrypt:           docker compose --profile caddy up -d
+# Сайт и PostgreSQL. Переменные подставляются из окружения: в App Platform Timeweb Cloud —
+# из раздела «Переменные» приложения, на своём сервере — из файла .env рядом с этим файлом
+# (cp .env.example .env). Отдельный env_file не нужен: .env не хранится в git.
 #
-# В App Platform Timeweb Cloud этот файл не нужен: приложение собирается из Dockerfile,
-# PostgreSQL — управляемая база (см. README).
+#   docker compose up -d                                                  — сайт и база
+#   docker compose -f docker-compose.yml -f deploy/caddy.yml up -d        — + HTTPS через Caddy
+#
+# С управляемой базой Timeweb задайте DATABASE_URL — контейнер postgres тогда не используется.
 
 services:
   site:
     build: .
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://site:${POSTGRES_PASSWORD:-site}@postgres:5432/site
     ports:
-      # Только для локального прокси: снаружи сайт открывается по https через прокси.
-      - '127.0.0.1:${SITE_PORT:-3000}:3000'
-    # Сервер Goldfish на этой же машине доступен как http://host.docker.internal:8080
-    # (GOLDFISH_ADMIN_URL).
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-    # Свой zip расширения вместо того, что раздаёт сервер Goldfish:
-    #   EXTENSION_ZIP=/app/extension/goldfish-extension.zip
-    # volumes:
-    #   - ./extension:/app/extension:ro
+      - '3000:3000'
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      DATABASE_URL: ${DATABASE_URL:-postgres://site:site@postgres:5432/site}
+      SESSION_DAYS: ${SESSION_DAYS:-30}
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+      GOLDFISH_URL: ${GOLDFISH_URL:-}
+      GOLDFISH_ADMIN_URL: ${GOLDFISH_ADMIN_URL:-}
+      GOLDFISH_ADMIN_TOKEN: ${GOLDFISH_ADMIN_TOKEN:-}
+      GOLDFISH_CLIENT_ID: ${GOLDFISH_CLIENT_ID:-}
+      GOLDFISH_CLIENT_NAME: ${GOLDFISH_CLIENT_NAME:-Сайт}
+      EXTENSION_ZIP: ${EXTENSION_ZIP:-}
+      PRIVACY_URL: ${PRIVACY_URL:-}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
 
+  # Наружу не публикуется: доступна только сайту внутри сети compose.
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: site
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-site}
+      POSTGRES_PASSWORD: site
       POSTGRES_DB: site
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD', 'pg_isready', '-U', 'site']
+      test: ['CMD-SHELL', 'pg_isready -U site -d site']
       interval: 5s
+      timeout: 5s
       retries: 10
-    restart: unless-stopped
-
-  # HTTPS с автоматическим сертификатом: SITE_DOMAIN в .env, A-запись домена на этот сервер,
-  # открытые порты 80 и 443.
-  caddy:
-    profiles: ['caddy']
-    image: caddy:2-alpine
-    environment:
-      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - site
     restart: unless-stopped
 
 volumes:
   pg-data:
-  caddy-data:
-  caddy-config:

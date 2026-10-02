@@ -69,29 +69,39 @@ npm run dev
 
 ## Развёртывание в Timeweb Cloud
 
-### Вариант А — App Platform
+### Вариант А — App Platform, Docker Compose
 
-1. Создайте управляемую базу PostgreSQL 16 — строка подключения пойдёт в `DATABASE_URL`. Таблицы
-   сайт создаёт сам при старте. Можно взять кластер сервера Goldfish, но отдельной базой.
-2. App Platform → новое приложение из этого репозитория, тип «Dockerfile», порт `3000`, проверка
-   состояния `/healthz`.
-3. Переменные — из [`.env.example`](.env.example): обязательно `NODE_ENV=production`, `PUBLIC_URL`,
-   `DATABASE_URL`, `YANDEX_CLIENT_ID`, `YANDEX_CLIENT_SECRET`, `GOLDFISH_URL`,
-   `GOLDFISH_ADMIN_TOKEN`.
+1. App Platform → новое приложение из этого репозитория, тип «Docker Compose»
+   (`docker-compose.yml` в корне). Сайт слушает порт `3000`, проверка состояния — `/healthz`.
+2. В разделе переменных приложения задайте: `PUBLIC_URL`, `YANDEX_CLIENT_ID`,
+   `YANDEX_CLIENT_SECRET`, `GOLDFISH_URL`, `GOLDFISH_ADMIN_TOKEN` (остальные — по желанию, список
+   ниже). Compose подставляет их в контейнер сам — файл `.env` в репозитории не нужен и не должен
+   там лежать.
+3. База: без `DATABASE_URL` сайт использует PostgreSQL из того же compose. Надёжнее управляемая база
+   Timeweb (резервные копии, переживает пересборку) — тогда задайте её строку в `DATABASE_URL`.
+   Таблицы сайт создаёт сам при старте.
 4. Привяжите домен. `PUBLIC_URL` — этот адрес с `https://`, он же в Redirect URI приложения Яндекс ID.
 
-### Вариант Б — облачный сервер с Docker
+Если сайт не стартует, в логах приложения будет `Invalid configuration` со списком незаданных
+переменных.
+
+### Вариант Б — App Platform, Dockerfile
+
+То же, но тип «Dockerfile» (порт `3000`, `/healthz`): контейнер только с сайтом, база — управляемая
+PostgreSQL 16 в `DATABASE_URL` (обязательна), плюс `NODE_ENV=production`.
+
+### Вариант В — облачный сервер с Docker
 
 ```bash
 git clone https://github.com/Bulat89/site_ai_agent.git && cd site_ai_agent
-cp .env.example .env                    # заполнить: PUBLIC_URL, YANDEX_*, GOLDFISH_*, SITE_DOMAIN, POSTGRES_PASSWORD
-docker compose --profile caddy up -d    # сайт + PostgreSQL + Caddy с сертификатом Let's Encrypt
+cp .env.example .env     # заполнить: PUBLIC_URL, YANDEX_*, GOLDFISH_*, SITE_DOMAIN
+docker compose -f docker-compose.yml -f deploy/caddy.yml up -d   # + Caddy с сертификатом Let's Encrypt
 ```
 
-- A-запись домена (`SITE_DOMAIN`) — на IP сервера, порты 80 и 443 открыты.
-- Уже есть nginx или другой прокси с TLS — запускайте без профиля: `docker compose up -d`, сайт
-  слушает `127.0.0.1:3000`.
-- Сервер Goldfish на этой же машине: `GOLDFISH_ADMIN_URL=http://host.docker.internal:8080`.
+- A-запись домена (`SITE_DOMAIN`) — на IP сервера, порты 80 и 443 открыты. С Caddy сайт слушает
+  только `127.0.0.1:3000`.
+- Уже есть nginx или другой прокси с TLS — просто `docker compose up -d` и проксируйте на порт
+  `3000`; закройте этот порт снаружи файрволом.
 - Обновление: `git pull && docker compose up -d --build`.
 - Резервная копия: `docker compose exec postgres pg_dump -U site site > site.sql`.
 

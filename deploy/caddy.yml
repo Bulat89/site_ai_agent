@@ -1,0 +1,28 @@
+# HTTPS на своём сервере: Caddy получает и продлевает сертификат Let's Encrypt сам.
+# Нужны SITE_DOMAIN в .env, A-запись домена на этот сервер и открытые порты 80 и 443.
+#   docker compose -f docker-compose.yml -f deploy/caddy.yml up -d
+
+services:
+  site:
+    # Снаружи сайт открывается только через Caddy.
+    ports: !override
+      - '127.0.0.1:3000:3000'
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?задайте SITE_DOMAIN в .env}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - site
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
