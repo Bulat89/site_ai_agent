@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PUBLIC_URL, sessionUser, signIn, startApp, type TestApp } from './helpers.js';
+import { PUBLIC_URL, sessionUser, signIn, startApp, testConfig, type TestApp } from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
 
@@ -318,5 +318,15 @@ describe('health', () => {
     t = await startApp();
     expect((await t.app.inject('/healthz')).json()).toEqual({ ok: true });
     expect((await t.app.inject('/readyz')).json()).toEqual({ ok: true });
+  });
+});
+
+describe('configuration', () => {
+  it('takes only http(s) addresses for links shown on the page', () => {
+    expect(() => testConfig({ PRIVACY_URL: 'javascript:alert(1)' })).toThrow(/http\(s\)/);
+    expect(() => testConfig({ GOLDFISH_URL: 'data:text/html,x' })).toThrow(/http\(s\)/);
+    expect(testConfig({ PRIVACY_URL: 'https://site.test/privacy/' }).PRIVACY_URL).toBe(
+      'https://site.test/privacy',
+    );
   });
 });
