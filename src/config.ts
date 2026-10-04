@@ -1,8 +1,10 @@
 import { z } from 'zod';
 
+/** An http(s) address: these end up in links and redirects on the page. */
 const url = z
   .string()
   .url()
+  .refine((v) => /^https?:\/\//i.test(v), { message: 'only http(s) addresses are allowed' })
   .transform((v) => v.replace(/\/+$/, ''));
 
 const EnvSchema = z
