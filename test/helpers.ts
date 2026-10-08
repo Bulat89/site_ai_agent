@@ -55,6 +55,117 @@ export class Fakes {
   readonly users = new Map<string, { displayName?: string }>();
   readonly tokens = new Map<string, { clientId: string; userId: string; revoked: boolean }>();
   goldfishDown = false;
+  /** Hotel agents of site users on the Goldfish server: requests the site forwarded. */
+  readonly hotelCalls: Array<{ method: string; path: string; body: unknown }> = [];
+  hotel = {
+    id: 'prop_1',
+    timezone: 'Europe/Moscow',
+    profile: {
+      name: 'Дом у моря',
+      checkIn: '14:00',
+      checkOut: '12:00',
+      rooms: [{ id: 'std', name: 'Стандарт', count: 2 }],
+      systems: [{ id: 'ostrovok' }],
+      policies: { pets: 'Можно' },
+      amenities: ['Wi-Fi'],
+      priceCorridor: { percent: 10, byRoom: {} },
+    } as Record<string, unknown>,
+    profileVersion: 3,
+    telegramLinked: false,
+    hookConfigured: false,
+    telegramBot: true,
+    settings: {
+      wave: 1,
+      pause: null,
+      owner: { quietFrom: '22:00', quietTo: '09:00', urgentPerDay: 5, summaryTime: '09:00' },
+      limits: { reviewAutoMinStars: 4, sharpChangePercent: 40 },
+      platforms: [
+        { id: 'ostrovok', title: 'Островок', category: 'guest', mode: 'full' },
+        { id: 'avito', title: 'Авито', category: 'guest', mode: 'full' },
+      ],
+      agents: [
+        {
+          id: 'channels',
+          title: 'Каналы продаж',
+          mission: 'Верные цены и наличие на площадках.',
+          metrics: ['открытые расхождения'],
+          enabled: true,
+          duties: [
+            {
+              id: 'channels.sync',
+              title: 'Сверка цен и наличия',
+              when: 'Каждое утро',
+              does: 'Сверяет',
+              wave: 1,
+              run: 'browser',
+              maxLevel: 'self',
+              alwaysOn: false,
+              enabled: true,
+              level: 'self',
+            },
+            {
+              id: 'channels.fix',
+              title: 'Исправление расхождений',
+              when: 'После сверки',
+              does: 'Исправляет',
+              wave: 1,
+              run: 'browser',
+              maxLevel: 'rule',
+              alwaysOn: false,
+              enabled: true,
+              level: 'approval',
+            },
+          ],
+        },
+        {
+          id: 'manager',
+          title: 'Управляющий',
+          mission: 'Говорит с владельцем.',
+          metrics: ['сводка вовремя'],
+          enabled: false,
+          duties: [
+            {
+              id: 'manager.approvals',
+              title: 'Очередь согласований',
+              when: 'Постоянно',
+              does: 'Очередь',
+              wave: 1,
+              run: 'code',
+              maxLevel: 'self',
+              alwaysOn: true,
+              enabled: true,
+              level: 'self',
+            },
+            {
+              id: 'manager.weekly',
+              title: 'Недельный отчёт',
+              when: 'По понедельникам',
+              does: 'Отчёт',
+              wave: 2,
+              run: 'code',
+              maxLevel: 'self',
+              alwaysOn: false,
+              enabled: false,
+              level: 'off',
+              reason: 'включится в волне 2',
+            },
+          ],
+        },
+      ],
+    },
+  };
+  approvals = [
+    {
+      id: 'apr_1',
+      agent: 'channels',
+      title: 'Исправить расхождения на площадках: 2',
+      reason: '2026-10-20 Люкс Островок цена 9000 / 8500',
+      cost: null,
+      urgent: false,
+      action: { kind: 'task', text: 'Исправь на площадках <b>расхождения</b>' },
+      createdAt: '2026-10-08T07:00:00.000Z',
+    },
+  ];
   extensionZip: Buffer | null = Buffer.from('PK\u0003\u0004fake-zip');
   readonly calls: string[] = [];
   private seq = 0;
@@ -137,6 +248,68 @@ export class Fakes {
         { token: `gf_secret_${id}`, tokenId: id, clientId: m[1], userId: body.userId },
         201,
       );
+    }
+    if ((m = /^\/admin\/users\/([^/]+)\/([^/]+)\/hotel(.*)$/.exec(path))) {
+      const sub = m[3]!;
+      this.hotelCalls.push({
+        method,
+        path: `${decodeURIComponent(m[2]!)} ${sub}${url.search}`,
+        body,
+      });
+      if (method === 'GET' && sub === '') return json(this.hotel);
+      if (method === 'GET' && sub === '/approvals') return json(this.approvals);
+      if (method === 'GET' && sub === '/kpi')
+        return json({
+          units: 2,
+          past30: { occupancy: 61.5, adr: 5200, revpar: 3198, directShare: 22 },
+          next30: { occupancy: 48 },
+          rating: 4.7,
+          responseMinutes: 3,
+        });
+      if (method === 'GET' && sub === '/feed')
+        return json([
+          {
+            kind: 'summary',
+            text: 'Доброе утро! Сегодня заездов — 1.',
+            createdAt: '2026-10-08T06:00:00.000Z',
+          },
+        ]);
+      if (method === 'POST' && sub === '/settings') {
+        const disabling = (
+          body.changes as Array<{ op: string; agent?: string; enabled?: boolean }>
+        ).some((c) => c.op === 'agent' && c.agent === 'channels' && !c.enabled);
+        return json({
+          ...this.hotel,
+          warnings: disabling
+            ? ['«Применение цен»: никто не проверит, что новая цена дошла до площадок.']
+            : [],
+        });
+      }
+      if (method === 'POST' && sub.startsWith('/approvals/')) {
+        if (sub !== '/approvals/apr_1')
+          return json({ error: 'bad_request', message: 'согласование не найдено' }, 400);
+        return json({
+          ...this.approvals[0],
+          status: body.decision === 'reject' ? 'rejected' : 'approved',
+        });
+      }
+      if (method === 'POST' && sub === '/telegram/link')
+        return json({
+          code: 'ABCD2345',
+          link: 'https://t.me/gf_bot?start=ABCD2345',
+          expiresInSec: 1800,
+        });
+      if (method === 'POST' && sub === '/hook-token')
+        return json({
+          token: 'gfh_x',
+          events: '/hotel/hooks/gfh_x/events',
+          email: '/hotel/hooks/gfh_x/email',
+        });
+      if (method === 'PUT' && sub === '/profile') {
+        if (!body.name) return json({ error: 'bad_request', message: 'name: обязательно' }, 400);
+        return json(this.hotel);
+      }
+      return json({ error: 'not_found' }, 404);
     }
     if (method === 'DELETE' && (m = /^\/admin\/tokens\/([^/]+)$/.exec(path))) {
       const token = this.tokens.get(m[1]!);

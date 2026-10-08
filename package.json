@@ -2,7 +2,7 @@
   "name": "goldfish-site",
   "version": "0.1.0",
   "private": true,
-  "description": "Сайт Goldfish: вход через Яндекс ID, скачивание расширения и выдача доступа к серверу агента",
+  "description": "Сайт Goldfish — агенты для гостевых домов и отелей: вход через Яндекс ID, расширение, доступ к серверу и кабинет агентов объекта",
   "type": "module",
   "main": "./dist/main.js",
   "engines": {

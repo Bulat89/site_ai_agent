@@ -95,6 +95,28 @@ export class GoldfishAdmin {
       throw new GoldfishError(`revoke token: ${res.status}`, res.status);
   }
 
+  /**
+   * The hotel agents of a site user (goldfish /admin/users/:clientId/:userId/hotel…): the site
+   * acts on the owner's behalf. Expected refusals (400) come back with the server's message.
+   */
+  async hotel<T = unknown>(
+    userId: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; body: T }> {
+    const clientId = await this.clientId();
+    const res = await this.call(
+      method,
+      `/admin/users/${enc(clientId)}/${enc(userId)}/hotel${path}`,
+      body,
+    );
+    if (res.status >= 500 || res.status === 401)
+      throw new GoldfishError(`${method} hotel${path}: ${res.status}`, res.status);
+    const text = await res.text();
+    return { status: res.status, body: (text ? JSON.parse(text) : {}) as T };
+  }
+
   /** The extension zip the Goldfish server hands out (public endpoint). */
   async extensionPackage(): Promise<Response> {
     try {
