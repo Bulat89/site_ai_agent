@@ -645,3 +645,257 @@ h1 {
 [data-copied]::after {
   content: ' ✓';
 }
+
+/* ---------------------------------------------------------------- landing: team, systems */
+
+.section-lead {
+  margin: -8px 0 24px;
+  color: var(--muted);
+  max-width: 44em;
+}
+.ticks {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+}
+.feature__metrics {
+  margin-top: 14px !important;
+  font-size: 14px;
+}
+.systems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 24px 0 0;
+}
+.tg {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border-bottom-left-radius: 4px;
+  background: var(--surface-2);
+}
+.tg__line {
+  margin: 0;
+}
+.card--wide {
+  grid-column: 1 / -1;
+}
+
+/* ---------------------------------------------------------------- agents page */
+
+.agents {
+  display: grid;
+  gap: 24px;
+  padding-bottom: 32px;
+}
+.agents .hero {
+  padding-bottom: 0;
+}
+.agents .eyebrow a {
+  color: inherit;
+}
+.muted {
+  color: var(--muted);
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 16px;
+}
+.grid2 {
+  display: grid;
+  gap: 0 16px;
+}
+@media (min-width: 720px) {
+  .grid2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.agents input,
+.agents select,
+.agents textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+.agents .row .field {
+  margin-bottom: 0;
+}
+.agents textarea.code {
+  font:
+    13px/1.45 ui-monospace,
+    'SF Mono',
+    Menlo,
+    Consolas,
+    monospace;
+}
+.agents select:focus-visible,
+.agents textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.tile__label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tile b {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.approval {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.approval:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.approval h3 {
+  font-size: 17px;
+  margin: 4px 0 6px;
+}
+.approval__agent {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.approval--urgent .approval__agent {
+  color: var(--bad);
+  font-weight: 600;
+}
+.approval__reason {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+.approval__text,
+.feed pre {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 14px;
+}
+.edit {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.edit[hidden] {
+  display: none;
+}
+.agents__grid {
+  display: grid;
+  gap: 16px;
+}
+@media (min-width: 980px) {
+  .agents__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.agent {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px;
+  min-width: 0;
+}
+.agent--on {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+}
+.agent__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.agent__head h3 {
+  font-size: 19px;
+}
+.agent__head .hint {
+  margin-top: 6px;
+}
+.agent__metrics {
+  margin: 10px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.duties {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.duties th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 6px 8px 6px 0;
+}
+.duties td {
+  padding: 8px 8px 8px 0;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+.duties td:last-child {
+  width: 150px;
+  padding-right: 0;
+}
+.duty--off td:first-child {
+  color: var(--muted);
+}
+.badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 420px;
+  overflow: auto;
+}
+.feed__meta {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+[data-hook][hidden],
+[data-telegram][hidden],
+[data-error][hidden],
+[data-page-error][hidden] {
+  display: none;
+}

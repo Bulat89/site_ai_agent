@@ -4,7 +4,7 @@ import type { UserRecord } from '../store/types.js';
 
 export type Notice = 'login_denied' | 'login_expired' | 'login_error' | 'download_unavailable';
 
-interface View {
+export interface View {
   assets: AssetUrls;
   goldfishUrl: string;
   privacyUrl?: string | undefined;
@@ -17,7 +17,7 @@ interface PageState extends View {
   notice: Notice | null;
 }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 const NOTICE_TEXT: Record<Notice, string> = {
   login_denied: 'Вход отменён. Чтобы получить доступ, разрешите сайту доступ к профилю Яндекс ID.',
@@ -31,12 +31,15 @@ const LOGO = `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="
 const YANDEX_MARK = `<svg class="ya" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="#fc3f1d"/><text x="12" y="17" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" fill="#fff">Я</text></svg>`;
 
 const ICONS = {
-  search: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>`,
-  hand: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5 9 17.5 20 6.5"/></svg>`,
-  repeat: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 3.5 20.5 7 17 10.5"/><path d="M3.5 12V10a3 3 0 0 1 3-3h14"/><path d="M7 20.5 3.5 17 7 13.5"/><path d="M20.5 12v2a3 3 0 0 1-3 3h-14"/></svg>`,
+  channels: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/><path d="m17 15 2 2 3-4"/></svg>`,
+  prices: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>`,
+  guests: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 10h8"/></svg>`,
+  reputation: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>`,
+  direct: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11v2a2 2 0 0 0 2 2h2l5 4V5L7 9H5a2 2 0 0 0-2 2z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/></svg>`,
+  manager: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>`,
 };
 
-function layout(v: View, title: string, body: string): string {
+export function layout(v: View, title: string, body: string): string {
   const footerLinks = [
     v.privacyUrl ? `<a href="${esc(v.privacyUrl)}">Политика обработки данных</a>` : '',
     v.supportEmail ? `<a href="mailto:${esc(v.supportEmail)}">${esc(v.supportEmail)}</a>` : '',
@@ -47,7 +50,7 @@ function layout(v: View, title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
-<meta name="description" content="Goldfish — AI-агент в вашем браузере: ищет и сравнивает данные, заполняет формы и работает в ваших аккаунтах с подтверждением важных действий.">
+<meta name="description" content="Goldfish — команда AI-агентов для гостевого дома и отеля: сверка цен и броней на площадках, ответы гостям за минуты, отзывы, реклама и утренняя сводка владельцу в Telegram.">
 <link rel="icon" href="${v.assets['favicon.ico']}" sizes="48x48">
 <link rel="icon" href="${v.assets['favicon.svg']}" type="image/svg+xml">
 <link rel="apple-touch-icon" href="${v.assets['apple-touch-icon.png']}">
@@ -64,7 +67,7 @@ ${body}
 </html>`;
 }
 
-function header(user: UserRecord | null): string {
+export function header(user: UserRecord | null): string {
   const right = user
     ? `<div class="me">
         ${user.avatarId ? `<img class="avatar" src="https://avatars.yandex.net/get-yapic/${encodeURIComponent(user.avatarId)}/islands-68" alt="" width="32" height="32">` : `<span class="avatar avatar--empty" aria-hidden="true">${esc((user.name ?? user.login ?? '?').slice(0, 1).toUpperCase())}</span>`}
@@ -82,65 +85,204 @@ function notice(n: Notice | null): string {
   return n ? `<div class="wrap"><p class="notice" role="status">${NOTICE_TEXT[n]}</p></div>` : '';
 }
 
-/** Illustration of the side panel: a task, the agent's trace and a confirmation. */
-const PANEL = `<div class="panel" aria-hidden="true">
-  <div class="panel__bar">${LOGO}<b>Goldfish</b><span class="panel__status">Подключено</span></div>
+/** Illustration: the manager's morning summary and an approval in Telegram. */
+const TELEGRAM = `<div class="panel" aria-hidden="true">
+  <div class="panel__bar">${LOGO}<b>Управляющий</b><span class="panel__status">Telegram</span></div>
   <div class="panel__body">
-    <p class="bubble bubble--user">Найди три самых дешёвых предложения на робот-пылесос и оформи заказ на лучшее</p>
-    <ul class="trace">
-      <li class="trace__done">Сравнил 23 предложения на трёх сайтах</li>
-      <li class="trace__done">Лучшее — 24 990 ₽, доставка завтра</li>
-      <li class="trace__run">Заполняю форму заказа…</li>
-    </ul>
+    <div class="tg">
+      <p class="tg__line"><b>Доброе утро! Дом у моря, 09.10.</b></p>
+      <p class="tg__line">Сегодня заездов — 3, выездов — 2.</p>
+      <p class="tg__line">Загрузка: 7 дней — 71%, 30 дней — 54%.</p>
+      <p class="tg__line">За сутки 4 брони на 38 400 ₽, отмен — 1.</p>
+      <p class="tg__line">Новых отзывов — 2, средняя оценка 4,5.</p>
+      <p class="tg__line">Открытых расхождений на площадках — 1.</p>
+    </div>
     <div class="confirm">
-      <p class="confirm__title">Подтвердите действие</p>
-      <p class="confirm__text">«Оформить заказ» на 24 990 ₽</p>
-      <div class="confirm__actions"><span class="chip chip--accent">Подтвердить</span><span class="chip">Отменить</span></div>
+      <p class="confirm__title">Цены и загрузка: цены за коридором</p>
+      <p class="confirm__text">Сб 14.11 «Люкс»: 11 500 ₽ (база 9 000 ₽) — праздник, загрузка 100%</p>
+      <div class="confirm__actions"><span class="chip chip--accent">Согласовать</span><span class="chip">Изменить</span><span class="chip">Отклонить</span></div>
     </div>
   </div>
 </div>`;
 
-const FEATURES = `<section class="features wrap" aria-labelledby="features-title">
-  <h2 id="features-title" class="section-title">Что умеет</h2>
+interface AgentCard {
+  icon: keyof typeof ICONS;
+  title: string;
+  text: string;
+  duties: string[];
+  metrics: string;
+}
+
+const AGENTS: AgentCard[] = [
+  {
+    icon: 'channels',
+    title: 'Каналы продаж',
+    text: 'Чтобы на каждой площадке были верные цены, свободные номера и описание, а ни один номер не продавался дважды.',
+    duties: [
+      'каждое утро сверяет цены и наличие на 60 дней между PMS и площадками',
+      'переносит новые брони в шахматку, исправляет расхождения',
+      'при овербукинге сам закрывает продажу и сразу пишет вам',
+    ],
+    metrics: 'расхождения, время до исправления, овербукинги',
+  },
+  {
+    icon: 'prices',
+    title: 'Цены и загрузка',
+    text: 'Работа ревеню-менеджера: сколько стоит ночь на каждую дату.',
+    duties: [
+      'цены 5–10 конкурентов рядом с цитатой на каждую цифру',
+      'загрузка и темп броней, рекомендация цены с объяснением',
+      'в вашем коридоре (например, ±10%) меняет цену сам',
+    ],
+    metrics: 'загрузка, ADR, RevPAR против прошлого года',
+  },
+  {
+    icon: 'guests',
+    title: 'Гости',
+    text: 'Переписка с гостем от первого вопроса до письма после выезда — по правилам площадки.',
+    duties: [
+      'отвечает на парковку, заезд, животных за 1–2 минуты',
+      'подтверждает брони, пишет до заезда и после выезда',
+      'жалобу — черновиком администратору с пометкой «срочно»',
+    ],
+    metrics: 'время первого ответа, доля вопросов без человека',
+  },
+  {
+    icon: 'reputation',
+    title: 'Репутация',
+    text: 'Рейтинг и отзывы на площадках бронирования, Яндекс Картах и 2ГИС.',
+    duties: [
+      'каждый день собирает рейтинги и новые отзывы',
+      'отвечает на 4–5 ★ сам, на 1–3 ★ — после вашего «да»',
+      'показывает, о чём пишут: чистота, тишина, завтрак, персонал',
+    ],
+    metrics: 'рейтинг, отзывы за 30 дней, ответ на негатив',
+  },
+  {
+    icon: 'direct',
+    title: 'Прямые продажи',
+    text: 'Чтобы объект платил меньше комиссии площадкам.',
+    duties: [
+      'воронка «обращение → бронь» по каналам',
+      'расход рекламы против бюджета, маркировка erid',
+      'любая трата денег — только после согласования',
+    ],
+    metrics: 'доля прямых броней, комиссия, стоимость брони',
+  },
+  {
+    icon: 'manager',
+    title: 'Управляющий',
+    text: 'Единственный, кто говорит с вами: собирает работу остальных агентов.',
+    duties: [
+      'утренняя сводка в Telegram в 5–7 строк',
+      'срочное — с тихими часами и лимитом в день',
+      'одна очередь согласований с кнопками',
+    ],
+    metrics: 'сводка вовремя, время решения по согласованию',
+  },
+];
+
+const TEAM = `<section class="features wrap" id="team" aria-labelledby="team-title">
+  <h2 id="team-title" class="section-title">Команда агентов</h2>
+  <p class="section-lead">Пять агентов отвечают за свои участки, шестой — управляющий — собирает их работу для вас. Каждый агент — набор обязанностей по расписанию или событию.</p>
+  <div class="grid3">
+${AGENTS.map(
+  (a) => `    <article class="feature">
+      <span class="feature__icon">${ICONS[a.icon]}</span>
+      <h3>${a.title}</h3>
+      <p>${a.text}</p>
+      <ul class="ticks">${a.duties.map((d) => `<li>${d}</li>`).join('')}</ul>
+      <p class="feature__metrics">Показатели: ${a.metrics}</p>
+    </article>`,
+).join('\n')}
+  </div>
+</section>`;
+
+const RULES = `<section class="features wrap" aria-labelledby="rules-title">
+  <h2 id="rules-title" class="section-title">Решения — за вами</h2>
   <div class="grid3">
     <article class="feature">
-      <span class="feature__icon">${ICONS.search}</span>
-      <h3>Ищет и сравнивает</h3>
-      <p>Собирает данные с нескольких сайтов в таблицу. У каждого факта — цитата со страницы, расчёты делает код, а не модель.</p>
+      <h3>Три уровня прав</h3>
+      <p><b>Сам</b> — чтение, расчёт и сообщения по утверждённому шаблону. <b>Правило</b> — действует сам в рамках вашего лимита, за лимитом спрашивает. <b>Согласование</b> — каждое действие подтверждаете вы. Поднять права может только владелец.</p>
     </article>
     <article class="feature">
-      <span class="feature__icon">${ICONS.hand}</span>
-      <h3>Действует за вас</h3>
-      <p>Заполняет формы и работает в личных кабинетах — в вашем браузере, с вашими входами. Необратимые шаги — только после проверки и вашего «да».</p>
+      <h3>Правила площадок</h3>
+      <p>Каждое сообщение гостю, ответ на отзыв и правка карточки проверяются по реестру правил площадок до отправки: контакты раньше времени, оплата мимо площадки, призыв бронировать напрямую. Изменения правил ловит отдельный агент.</p>
     </article>
     <article class="feature">
-      <span class="feature__icon">${ICONS.repeat}</span>
-      <h3>Повторяет по шаблону</h3>
-      <p>Частые задания сохраняются как шаблоны и запускаются по расписанию. Ассистент помнит прошлые разговоры и результаты.</p>
+      <h3>Выключить можно всё</h3>
+      <p>Агента, обязанность, площадку, права или поставить паузу — командой в Telegram («выключи рекламу», «пауза до 15.11 ремонт») или на странице настроек. Выключенное не открывает кабинеты и не тратит токены.</p>
     </article>
   </div>
+</section>`;
+
+const SYSTEMS = [
+  'Bnovo',
+  'TravelLine',
+  'Контур.Отель',
+  'Shelter',
+  'Realty Calendar',
+  'шахматка в таблице',
+  'Островок',
+  'Яндекс Путешествия',
+  'Авито',
+  '101Hotels',
+  'OneTwoTrip',
+  'Ozon Travel',
+  'roomlink',
+  'Академсервис',
+  'Алеан',
+  'Bronevik.com',
+  'hotelbook',
+  'Яндекс Карты',
+  '2ГИС',
+  'Яндекс Директ',
+  'VK Реклама',
+  'Telegram',
+];
+
+const HOW = `<section class="how wrap" aria-labelledby="how-title">
+  <h2 id="how-title" class="section-title">Как это работает</h2>
+  <ol class="steps">
+    <li><b>Агенты ставят задания</b> исполнителям Goldfish: один читает страницы, другой меняет данные. Повтор частых заданий — без затрат на модель.</li>
+    <li><b>Исполнители работают в вашем браузере</b> — в PMS и кабинетах площадок с вашими входами. Пароли агенты не вводят, необратимые действия проверяет верификатор.</li>
+    <li><b>Важное — после вашего «да»</b>: сводка, срочное и кнопки согласований приходят от управляющего в Telegram.</li>
+  </ol>
+  <p class="systems" aria-label="Системы">${SYSTEMS.map((x) => `<span class="chip">${x}</span>`).join(' ')}</p>
+</section>`;
+
+const WAVES = `<section class="how wrap" aria-labelledby="waves-title">
+  <h2 id="waves-title" class="section-title">Запуск волнами</h2>
+  <ol class="steps">
+    <li><b>Видеть всё и не терять брони.</b> Сверка площадок и защита от овербукинга, сводка и срочное, конкуренты и загрузка, сбор отзывов, письмо после выезда.</li>
+    <li><b>Отвечать и советовать.</b> Ответы гостям и на отзывы, рекомендации цен, аналитика рекламы и каналов, согласования в Telegram.</li>
+    <li><b>Действовать по правилам.</b> Цены сами в коридоре, акции под пустые даты, управление рекламой, рассылки постоянным гостям, сайт и фото.</li>
+  </ol>
 </section>`;
 
 function guest(): string {
   return `<section class="hero wrap">
   <div class="hero__text">
-    <p class="eyebrow">Расширение для Chrome и Яндекс Браузера</p>
-    <h1>AI-агент, который работает в&nbsp;вашем браузере</h1>
-    <p class="lead">Опишите задачу в боковой панели — агент найдёт и сравнит данные, заполнит формы и выполнит действия в ваших аккаунтах. Важные шаги он сначала покажет вам.</p>
+    <p class="eyebrow">Для гостевых домов, мини-отелей и апартаментов</p>
+    <h1>Команда AI-агентов для вашего объекта размещения</h1>
+    <p class="lead">Шесть агентов-сотрудников сверяют цены и брони на площадках, отвечают гостям за минуты, следят за отзывами и рекламой. Управляющий присылает в Telegram короткую сводку и кнопки согласований — решения остаются за вами.</p>
     <div class="cta">
       <a class="btn btn--yandex" href="/auth/yandex">${YANDEX_MARK}Войти с Яндекс ID</a>
-      <span class="cta__note">Ранний доступ открыт для всех зарегистрированных</span>
+      <span class="cta__note">Ранний доступ для пилотных объектов</span>
     </div>
   </div>
-  ${PANEL}
+  ${TELEGRAM}
 </section>
-${FEATURES}
-<section class="how wrap" aria-labelledby="how-title">
-  <h2 id="how-title" class="section-title">Как начать</h2>
+${TEAM}
+${HOW}
+${RULES}
+${WAVES}
+<section class="how wrap" aria-labelledby="start-title">
+  <h2 id="start-title" class="section-title">Как начать</h2>
   <ol class="steps">
-    <li><b>Войдите</b> через Яндекс ID — пароль не нужен.</li>
-    <li><b>Скачайте</b> расширение и установите его в браузер.</li>
-    <li><b>Подключите</b>: вставьте в боковую панель адрес сервера и свой токен.</li>
+    <li><b>Войдите</b> через Яндекс ID и установите расширение в браузер, где открыты ваши PMS и кабинеты площадок.</li>
+    <li><b>Заполните эталон объекта</b>: номера, цены, правила заселения и ответы на частые вопросы — единый источник правды для агентов.</li>
+    <li><b>Включите агентов</b> одной кнопкой и привяжите Telegram — первая сводка придёт утром.</li>
   </ol>
 </section>`;
 }
@@ -162,7 +304,7 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   <div class="hero__text">
     <p class="eyebrow eyebrow--ok"><span class="dot"></span>${esc(access.label)} · доступ открыт</p>
     <h1>Здравствуйте${first ? `, ${esc(first)}` : ''}!</h1>
-    <p class="lead">Два шага — и агент работает в вашем браузере.</p>
+    <p class="lead">Три шага — и команда агентов работает на ваш объект.</p>
   </div>
 </section>
 <section class="cabinet wrap" aria-label="Установка и подключение">
@@ -191,16 +333,21 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
       <p class="error" id="token-error" role="alert" hidden></p>
       ${issued}
     </div>
-    <p class="hint">Нажмите «Сохранить» — индикатор «Подключено» значит, что можно писать задачи.</p>
+    <p class="hint">Нажмите «Сохранить» — индикатор «Подключено» значит, что агенты могут работать в вашем браузере.</p>
+  </article>
+  <article class="card card--wide">
+    <h2><span class="num">3</span>Настройте агентов объекта</h2>
+    <p>Заполните эталон объекта, включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
+    <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
   </article>
 </section>`;
 }
 
 export function renderPage(s: PageState): string {
-  const main = s.user && s.access ? cabinet(s.user, s.access, s.goldfishUrl) + FEATURES : guest();
+  const main = s.user && s.access ? cabinet(s.user, s.access, s.goldfishUrl) + TEAM : guest();
   return layout(
     s,
-    'Goldfish — AI-агент в браузере',
+    'Goldfish — агенты для гостевого дома и отеля',
     `${header(s.user)}
 ${notice(s.notice)}
 <main>

@@ -18,7 +18,17 @@ describe('landing page', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Войти с Яндекс ID');
     expect(res.body).toContain('href="/auth/yandex"');
-    expect(res.body).toContain('Что умеет');
+    expect(res.body).toContain('Команда AI-агентов для вашего объекта размещения');
+    for (const agent of [
+      'Каналы продаж',
+      'Цены и загрузка',
+      'Гости',
+      'Репутация',
+      'Прямые продажи',
+      'Управляющий',
+    ])
+      expect(res.body).toContain(`<h3>${agent}</h3>`);
+    expect(res.body).toContain('Запуск волнами');
     expect(res.body).not.toContain('Скачать расширение');
     expect(res.headers['content-security-policy']).toContain("script-src 'self'");
     expect(res.headers['x-frame-options']).toBe('DENY');

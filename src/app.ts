@@ -4,10 +4,17 @@ import Fastify, {
   type FastifyInstance,
   type FastifyRequest,
 } from 'fastify';
-import { accessOf } from './access.js';
+import { accessOf, goldfishUserId } from './access.js';
 import { isSecure } from './config.js';
 import { openExtension } from './extension.js';
 import { renderNotFound, renderPage, type Notice } from './pages/page.js';
+import {
+  renderAgents,
+  type ApprovalView,
+  type FeedItem,
+  type HotelView,
+  type KpiView,
+} from './pages/agents.js';
 import type { Services } from './services.js';
 import { registerStatic } from './static.js';
 
@@ -165,6 +172,94 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       });
     }
   });
+
+  // ---------------------------------------------------------------- hotel agents
+
+  app.get('/agents', async (req, reply) => {
+    const user = await sessions.user(req);
+    if (!user) return reply.redirect('/auth/yandex');
+    if (!accessOf(user).allowed) return reply.redirect('/');
+    const gf = goldfishUserId(user);
+    let state: Parameters<typeof renderAgents>[0] = {
+      ...view,
+      user,
+      hotel: null,
+      approvals: [],
+      kpi: null,
+      feed: [],
+      error: null,
+    };
+    try {
+      const [hotel, approvals, kpi, feed] = await Promise.all([
+        s.goldfish.hotel<HotelView>(gf, 'GET', ''),
+        s.goldfish.hotel<ApprovalView[]>(gf, 'GET', '/approvals?status=pending'),
+        s.goldfish.hotel<KpiView>(gf, 'GET', '/kpi'),
+        s.goldfish.hotel<FeedItem[]>(gf, 'GET', '/feed?limit=20'),
+      ]);
+      if (hotel.status !== 200) throw new Error(`hotel: ${hotel.status}`);
+      state = {
+        ...state,
+        hotel: hotel.body,
+        approvals: approvals.status === 200 ? approvals.body : [],
+        kpi: kpi.status === 200 ? kpi.body : null,
+        feed: feed.status === 200 ? feed.body : [],
+      };
+    } catch (err) {
+      req.log.error({ err }, 'agents page: goldfish unavailable');
+      state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+    }
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'private, no-store')
+      .send(renderAgents(state));
+  });
+
+  /**
+   * Changes from the agents page, proxied to Goldfish on the owner's behalf. Only from this site's
+   * pages, only for a signed-in user with access; the server's refusals come back as they are.
+   */
+  const proxy =
+    (method: 'POST' | 'PUT', path: (req: FastifyRequest) => string) =>
+    async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
+      reply.header('cache-control', 'no-store');
+      if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden' });
+      const user = await sessions.user(req);
+      if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
+      const access = accessOf(user);
+      if (!access.allowed)
+        return reply.code(403).send({ error: 'no_access', message: access.reason });
+      try {
+        const res = await s.goldfish.hotel(goldfishUserId(user), method, path(req), req.body ?? {});
+        return reply.code(res.status).send(res.body);
+      } catch (err) {
+        req.log.error({ err }, 'agents change: goldfish unavailable');
+        return reply.code(502).send({
+          error: 'goldfish_unavailable',
+          message: 'Сервер агентов сейчас недоступен — попробуйте через минуту',
+        });
+      }
+    };
+  const id = (req: FastifyRequest) => encodeURIComponent((req.params as { id: string }).id);
+  app.post(
+    '/api/agents/settings',
+    proxy('POST', () => '/settings'),
+  );
+  app.post(
+    '/api/agents/approvals/:id',
+    proxy('POST', (req) => `/approvals/${id(req)}`),
+  );
+  app.post(
+    '/api/agents/telegram',
+    proxy('POST', () => '/telegram/link'),
+  );
+  app.post(
+    '/api/agents/hook-token',
+    proxy('POST', () => '/hook-token'),
+  );
+  app.put(
+    '/api/agents/profile',
+    proxy('PUT', () => '/profile'),
+  );
 
   app.setNotFoundHandler(async (_req, reply) =>
     reply.code(404).type('text/html; charset=utf-8').send(renderNotFound(view)),
