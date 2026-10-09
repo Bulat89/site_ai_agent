@@ -199,8 +199,11 @@ ${AGENTS.map(
       <span class="feature__icon">${ICONS[a.icon]}</span>
       <h3>${a.title}</h3>
       <p>${a.text}</p>
-      <ul class="ticks">${a.duties.map((d) => `<li>${d}</li>`).join('')}</ul>
-      <p class="feature__metrics">Показатели: ${a.metrics}</p>
+      <details class="feature__more">
+        <summary>Что делает</summary>
+        <ul class="ticks">${a.duties.map((d) => `<li>${d}</li>`).join('')}</ul>
+        <p class="feature__metrics">Показатели: ${a.metrics}</p>
+      </details>
     </article>`,
 ).join('\n')}
   </div>
@@ -290,7 +293,7 @@ ${WAVES}
   <h2 id="start-title" class="section-title">Как начать</h2>
   <ol class="steps">
     <li><b>Войдите</b> через Яндекс ID и установите расширение в браузер, где открыты ваши PMS и кабинеты площадок.</li>
-    <li><b>Заполните эталон объекта</b>: номера, цены, правила заселения и ответы на частые вопросы — единый источник правды для агентов.</li>
+    <li><b>Заполните эталон объекта</b>: пришлите ссылку на карточку на Авито или Яндекс Путешествиях — агент перенесёт номера, цены, правила и удобства, вы проверите и примените.</li>
     <li><b>Включите агентов</b> одной кнопкой и привяжите Telegram — первая сводка придёт утром.</li>
   </ol>
 </section>`;
@@ -346,7 +349,7 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   </article>
   <article class="card card--wide">
     <h2><span class="num">3</span>Настройте агентов объекта</h2>
-    <p>Заполните эталон объекта, включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
+    <p>Заполните эталон объекта (можно по ссылке на карточку Авито или Яндекс Путешествий), включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
     <div class="row">
       <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
       <a class="btn btn--ghost" href="/help">Инструкция по всем сценариям</a>

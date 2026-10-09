@@ -483,3 +483,149 @@ if (guideSearch) {
   window.addEventListener('hashchange', openFromHash);
   openFromHash();
 }
+
+// ---------------------------------------------------------------- folded agent cards
+// Duties of every agent are folded by default. The page remembers which cards the owner opened,
+// so a change of rights (which reloads the page) does not fold the card being edited.
+
+const FOLD_KEY = 'agents:open';
+const folds = [...document.querySelectorAll('details[data-fold]')];
+
+function readFolds() {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem(FOLD_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeFolds(open) {
+  try {
+    sessionStorage.setItem(FOLD_KEY, JSON.stringify([...open]));
+  } catch {
+    // Storage blocked: cards just start folded after a reload.
+  }
+}
+
+if (folds.length) {
+  const open = readFolds();
+  for (const d of folds) if (open.has(d.getAttribute('data-fold'))) d.open = true;
+  const foldAll = document.querySelector('[data-fold-all]');
+  const syncFoldAll = () => {
+    if (foldAll)
+      foldAll.textContent = folds.every((d) => d.open) ? 'Свернуть всё' : 'Развернуть всё';
+  };
+  for (const d of folds)
+    d.addEventListener('toggle', () => {
+      const now = readFolds();
+      if (d.open) now.add(d.getAttribute('data-fold'));
+      else now.delete(d.getAttribute('data-fold'));
+      writeFolds(now);
+      syncFoldAll();
+    });
+  if (foldAll)
+    foldAll.addEventListener('click', () => {
+      const target = !folds.every((d) => d.open);
+      for (const d of folds) d.open = target;
+    });
+  syncFoldAll();
+}
+
+// ---------------------------------------------------------------- reference from a card
+// A link or the text of a card goes to the agent; while it reads, the page polls and reloads
+// with the draft. The draft is applied field by field — nothing changes before that.
+
+const importError = document.querySelector('[data-import-error]');
+
+function showImportError(message) {
+  if (!importError) return showError(message);
+  importError.textContent = message;
+  importError.hidden = false;
+}
+
+async function startImport(body, form) {
+  if (importError) importError.hidden = true;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const data = await agentsCall('POST', '/api/agents/profile/import', body);
+    if (data.status === 'failed') throw new Error(`Не получилось: ${data.error}`);
+    location.reload();
+  } catch (err) {
+    showImportError(err.message);
+    button.disabled = false;
+  }
+}
+
+const importUrl = document.querySelector('form[data-form="import-url"]');
+if (importUrl)
+  importUrl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startImport({ url: importUrl.elements.url.value.trim() }, importUrl);
+  });
+
+const importText = document.querySelector('form[data-form="import-text"]');
+if (importText)
+  importText.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startImport({ text: importText.elements.text.value }, importText);
+  });
+
+const importPoll = document.querySelector('[data-import-poll]');
+if (importPoll) {
+  const id = importPoll.getAttribute('data-import-poll');
+  const started = Date.now();
+  const tick = async () => {
+    try {
+      const res = await fetch(`/api/agents/profile/import/${encodeURIComponent(id)}`, {
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === 'failed') {
+        importPoll.classList.remove('import--wait');
+        importPoll.textContent = `Не получилось прочитать карточку: ${data.error}. Попробуйте ещё раз или вставьте текст карточки.`;
+        importPoll.classList.add('error');
+        setTimeout(() => location.reload(), 8000);
+        return;
+      }
+      if (res.ok && data.status !== 'reading') return location.reload();
+    } catch {
+      // A network hiccup: try again on the next tick.
+    }
+    if (Date.now() - started < 15 * 60_000) setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 5000);
+}
+
+const importApply = document.querySelector('form[data-form="import-apply"]');
+if (importApply) {
+  importApply.addEventListener(
+    'submit',
+    guarded(async (event) => {
+      event.preventDefault();
+      const fields = [...importApply.querySelectorAll('input[name="field"]:checked')].map(
+        (x) => x.value,
+      );
+      if (!fields.length) throw new Error('Отметьте хотя бы одно поле');
+      const id = importApply.getAttribute('data-id');
+      const data = await agentsCall(
+        'POST',
+        `/api/agents/profile/import/${encodeURIComponent(id)}/apply`,
+        { fields },
+      );
+      reloadWith(`Эталон обновлён: ${(data.applied || []).join(', ')}.`);
+    }),
+  );
+}
+
+document.querySelectorAll('[data-act="import-discard"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      button.disabled = true;
+      const id = button.getAttribute('data-id');
+      await agentsCall('POST', `/api/agents/profile/import/${encodeURIComponent(id)}/discard`);
+      location.reload();
+    }),
+  ),
+);

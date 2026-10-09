@@ -1171,3 +1171,126 @@ h1 {
 .guide-item__body code {
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------- folded agents */
+
+.agent__state {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.agent__state--on {
+  color: var(--ok);
+}
+.agent__more,
+.feature__more,
+.profile__manual,
+.import__text {
+  margin-top: 12px;
+}
+.agent__more > summary,
+.feature__more > summary,
+.profile__manual > summary,
+.import__text > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--accent);
+  padding: 6px 0;
+  width: fit-content;
+}
+.agent__more > summary:hover,
+.feature__more > summary:hover,
+.profile__manual > summary:hover,
+.import__text > summary:hover {
+  text-decoration: underline;
+}
+.profile__manual > summary {
+  margin-bottom: 12px;
+}
+.row--tight {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+/* ---------------------------------------------------------------- reference from a card */
+
+.import {
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  border: 1px dashed var(--accent);
+  border-radius: 14px;
+  background: var(--accent-soft);
+}
+.import h3 {
+  font-size: 18px;
+}
+.import .hint {
+  margin: 6px 0 12px;
+}
+.import .field__row input {
+  flex: 1;
+  min-width: 0;
+}
+.import textarea {
+  width: 100%;
+  margin: 8px 0;
+}
+.import__text {
+  font-size: 14px;
+}
+.import--wait {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.import--wait .hint {
+  margin: 4px 0 0;
+}
+.import--ready {
+  border-style: solid;
+}
+.table-scroll {
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+.import__table td,
+.import__table th {
+  vertical-align: top;
+}
+.import__table td:first-child,
+.import__table th:first-child {
+  width: 28px;
+}
+.import__table td:last-child {
+  width: auto;
+}
+.import__table input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
