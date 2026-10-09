@@ -82,7 +82,21 @@ export interface AgentsState extends View {
   approvals: ApprovalView[];
   kpi: KpiView | null;
   feed: FeedItem[];
+  /** The latest draft of the reference from a card, while it is read or waits for the owner. */
+  profileImport?: ProfileImportView | null;
   error: string | null;
+}
+
+/** «Эталон из карточки» (GET …/hotel/profile/import). */
+export interface ProfileImportView {
+  id: string;
+  status: 'reading' | 'ready' | 'failed' | 'applied' | 'discarded';
+  source: 'url' | 'text';
+  url: string | null;
+  platform: string | null;
+  error: string | null;
+  createdAt: string;
+  fields: Array<{ key: string; label: string; value: string; current: string }>;
 }
 
 const LEVEL_TITLES: Record<Level, string> = {
@@ -146,9 +160,9 @@ function firstSteps(h: HotelView): string {
   const steps: Array<{ done: boolean; title: string; href: string; help: string }> = [
     {
       done: !!h.profile.name && rooms.length > 0,
-      title: 'Заполните эталон: название и номера',
+      title: 'Заполните эталон: название и номера — можно по ссылке на карточку',
       href: '#profile-title',
-      help: 'rooms',
+      help: 'profile-card',
     },
     {
       done: (h.profile.systems ?? []).length > 0,
@@ -247,15 +261,26 @@ function permissionDialog(): string {
 </dialog>`;
 }
 
+/**
+ * An agent: title, mission, state and the switch are always visible; duties with their rights are
+ * folded by default (the page remembers which cards the owner opened, see app.js).
+ */
 function agentCard(a: HotelView['settings']['agents'][number], wave: number): string {
+  const working = a.duties.filter((d) => d.enabled).length;
+  const state = a.enabled
+    ? `<span class="agent__state agent__state--on">работает · ${working} из ${a.duties.length} обязанностей</span>`
+    : `<span class="agent__state">выключен</span>`;
   return `<article class="agent${a.enabled ? ' agent--on' : ''}">
   <header class="agent__head">
     <div>
       <h3>${esc(a.title)}</h3>
       <p class="hint">${esc(a.mission)}</p>
+      ${state}
     </div>
     <button class="btn btn--sm ${a.enabled ? 'btn--ghost' : 'btn--accent'}" type="button" data-act="settings" data-changes="${attr([{ op: 'agent', agent: a.id, enabled: !a.enabled }])}">${a.enabled ? 'Выключить' : 'Включить'}</button>
   </header>
+  <details class="agent__more" data-fold="agent:${esc(a.id)}">
+  <summary>Обязанности и права · ${a.duties.length}</summary>
   <p class="agent__metrics">Показатели: ${esc(a.metrics.join(', '))}</p>
   <table class="duties">
     <thead><tr><th>Обязанность</th><th>Когда</th><th>Права</th></tr></thead>
@@ -271,6 +296,7 @@ ${a.duties
   .join('\n')}
     </tbody>
   </table>
+  </details>
 </article>`;
 }
 
@@ -319,6 +345,59 @@ const PROFILE_LISTS: Array<{ key: string; title: string; example: string }> = [
   },
   { key: 'upsells', title: 'Допродажи', example: '[{"name":"Ранний заезд","price":1000}]' },
 ];
+
+/**
+ * «Заполнить из карточки»: a link to the property's card on any aggregator, or its text. While
+ * the agent reads it, the page waits (app.js polls); a ready draft shows the found fields next
+ * to the current ones, each with a checkbox. Nothing changes until the owner applies.
+ */
+function importBlock(imp: ProfileImportView | null | undefined): string {
+  const where = imp?.platform ? ` на ${esc(imp.platform)}` : '';
+  if (imp?.status === 'reading')
+    return `<div class="import import--wait" data-import-poll="${esc(imp.id)}" role="status">
+  <span class="spinner" aria-hidden="true"></span>
+  <div>
+    <b>Агент читает карточку${where}…</b>
+    <p class="hint">Обычно 1–3 минуты. Браузер с расширением Goldfish должен быть открыт. Страница обновится сама.</p>
+  </div>
+</div>`;
+  if (imp?.status === 'ready')
+    return `<form class="import import--ready" data-form="import-apply" data-id="${esc(imp.id)}">
+  <h3>Черновик из карточки${where}: найдено ${imp.fields.length}</h3>
+  <p class="hint">Отметьте, что перенести в эталон. Списки дополняются, а не заменяются; у новых номеров количество — 1, проверьте его потом в поле «Номера».</p>
+  <div class="table-scroll"><table class="duties import__table">
+    <thead><tr><th><span class="visually-hidden">Перенести</span></th><th>Поле</th><th>Из карточки</th><th>Сейчас в эталоне</th></tr></thead>
+    <tbody>
+${imp.fields
+  .map(
+    (f) =>
+      `      <tr><td><input type="checkbox" name="field" value="${esc(f.key)}" checked aria-label="Перенести «${esc(f.label)}»"></td><td>${esc(f.label)}</td><td>${esc(f.value)}</td><td class="muted">${f.current ? esc(f.current) : '—'}</td></tr>`,
+  )
+  .join('\n')}
+    </tbody>
+  </table></div>
+  <div class="row">
+    <button class="btn btn--accent btn--sm" type="submit">Применить выбранное</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-act="import-discard" data-id="${esc(imp.id)}">Не применять</button>
+  </div>
+</form>`;
+  return `<div class="import">
+  <h3>Заполнить из карточки</h3>
+  <p class="hint">Пришлите ссылку на карточку вашего объекта на Авито, Яндекс Путешествиях, Островке или другом агрегаторе — агент прочитает её и предложит, что перенести в эталон. Без вашего «применить» ничего не изменится.</p>
+  <form class="field__row" data-form="import-url">
+    <input name="url" type="url" required placeholder="https://www.avito.ru/…" aria-label="Ссылка на карточку объекта">
+    <button class="btn btn--accent btn--sm" type="submit">Заполнить</button>
+  </form>
+  <details class="import__text">
+    <summary>Нет ссылки или карточка не открывается? Вставьте её текст</summary>
+    <form data-form="import-text">
+      <textarea name="text" rows="5" required aria-label="Текст карточки" placeholder="Скопируйте со страницы карточки описание, номера с ценами, удобства и правила"></textarea>
+      <button class="btn btn--ghost btn--sm" type="submit">Разобрать текст</button>
+    </form>
+  </details>
+  <p class="error" data-import-error role="alert" hidden></p>
+</div>`;
+}
 
 function profileForm(h: HotelView): string {
   const p = h.profile as Record<string, unknown>;
@@ -456,7 +535,7 @@ export function renderAgents(s: AgentsState): string {
     <p class="hint">На паузе записи на площадках и сообщения ждут, чтение и сводка идут.</p>
   </section>
   <section aria-labelledby="team-title">
-    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2>${helpLink('levels', 'Что значат права?')}</div>
+    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2><span class="row row--tight"><button class="link" type="button" data-fold-all="agent:">Развернуть всё</button>${helpLink('levels', 'Что значат права?')}</span></div>
     <p class="hint">«Выполнить» — дать задание сейчас. Если обязанность выключена, агент спросит разрешение. ${helpLink('permission', 'Подробнее')}</p>
     <div class="agents__grid">
 ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
@@ -474,9 +553,13 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
     </article>
   </section>
   <section class="card" aria-labelledby="profile-title">
-    <div class="card__head"><h2 id="profile-title">Эталон объекта</h2>${helpLink('profile-fill', 'Как заполнить?')}</div>
+    <div class="card__head"><h2 id="profile-title">Эталон объекта</h2>${helpLink('profile-card', 'Как заполнить?')}</div>
     <p class="hint">Единый источник правды для всех агентов: по нему сверяются карточки и сайт, из него собираются ответы гостям.</p>
-    ${profileForm(h)}
+    ${importBlock(s.profileImport)}
+    <details class="profile__manual"${s.profileImport?.status === 'ready' ? '' : ' open'}>
+      <summary>Заполнить вручную</summary>
+      ${profileForm(h)}
+    </details>
   </section>
   <section class="cabinet">
     <article class="card">

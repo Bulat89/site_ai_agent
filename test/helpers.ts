@@ -36,7 +36,24 @@ export interface YandexProfile {
 }
 
 /** In-memory Yandex ID (token + info endpoints) and Goldfish admin API behind one fetch. */
+/** A ready draft of the reference from a card on Avito. */
+export const IMPORT_READY = {
+  id: 'imp_1',
+  status: 'ready',
+  source: 'url',
+  url: 'https://www.avito.ru/sochi/doma/dom_1',
+  platform: 'Авито',
+  error: null,
+  createdAt: '2026-10-09T10:00:00.000Z',
+  fields: [
+    { key: 'name', label: 'Название', value: 'Дом у моря <b>', current: 'Дом у моря' },
+    { key: 'rooms', label: 'Номера', value: 'Люкс, до 3 гостей, 9 500 ₽', current: '' },
+  ],
+};
+
 export class Fakes {
+  /** GET …/hotel/profile/import: the latest draft, if any. */
+  profileImport: unknown = null;
   // Yandex
   profile: YandexProfile = {
     id: '1000001',
@@ -293,6 +310,19 @@ export class Fakes {
           status: body.decision === 'reject' ? 'rejected' : 'approved',
         });
       }
+      if (method === 'GET' && sub === '/profile/import') return json(this.profileImport);
+      if (method === 'POST' && sub === '/profile/import') {
+        if (!body.url && !body.text)
+          return json(
+            { error: 'bad_request', message: 'пришлите ссылку на карточку или её текст' },
+            400,
+          );
+        return json({ ...IMPORT_READY, status: 'reading', fields: [] }, 201);
+      }
+      if (method === 'GET' && sub === '/profile/import/imp_1') return json(IMPORT_READY);
+      if (method === 'POST' && sub === '/profile/import/imp_1/apply')
+        return json({ ...this.hotel, applied: ['Название'] });
+      if (method === 'POST' && sub === '/profile/import/imp_1/discard') return json({ ok: true });
       if (method === 'POST' && sub === '/duties/channels.sync/run') {
         if (!body.grant)
           return json({

@@ -15,6 +15,7 @@ import {
   type FeedItem,
   type HotelView,
   type KpiView,
+  type ProfileImportView,
 } from './pages/agents.js';
 import type { Services } from './services.js';
 import { registerStatic } from './static.js';
@@ -200,11 +201,12 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       error: null,
     };
     try {
-      const [hotel, approvals, kpi, feed] = await Promise.all([
+      const [hotel, approvals, kpi, feed, profileImport] = await Promise.all([
         s.goldfish.hotel<HotelView>(gf, 'GET', ''),
         s.goldfish.hotel<ApprovalView[]>(gf, 'GET', '/approvals?status=pending'),
         s.goldfish.hotel<KpiView>(gf, 'GET', '/kpi'),
         s.goldfish.hotel<FeedItem[]>(gf, 'GET', '/feed?limit=20'),
+        s.goldfish.hotel<ProfileImportView | null>(gf, 'GET', '/profile/import'),
       ]);
       if (hotel.status !== 200) throw new Error(`hotel: ${hotel.status}`);
       state = {
@@ -213,6 +215,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         approvals: approvals.status === 200 ? approvals.body : [],
         kpi: kpi.status === 200 ? kpi.body : null,
         feed: feed.status === 200 ? feed.body : [],
+        profileImport: profileImport.status === 200 ? profileImport.body : null,
       };
     } catch (err) {
       req.log.error({ err }, 'agents page: goldfish unavailable');
@@ -270,6 +273,33 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     '/api/agents/duties/:id/run',
     proxy('POST', (req) => `/duties/${id(req)}/run`),
   );
+  app.post(
+    '/api/agents/profile/import',
+    proxy('POST', () => '/profile/import'),
+  );
+  app.post(
+    '/api/agents/profile/import/:id/apply',
+    proxy('POST', (req) => `/profile/import/${id(req)}/apply`),
+  );
+  app.post(
+    '/api/agents/profile/import/:id/discard',
+    proxy('POST', (req) => `/profile/import/${id(req)}/discard`),
+  );
+  // Polled by the page while the agent reads a card. A read: same-origin fetch sends no Origin
+  // for GET, so only the session is checked.
+  app.get('/api/agents/profile/import/:id', async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    const user = await sessions.user(req);
+    if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
+    if (!accessOf(user).allowed) return reply.code(403).send({ error: 'no_access' });
+    try {
+      const res = await s.goldfish.hotel(goldfishUserId(user), 'GET', `/profile/import/${id(req)}`);
+      return reply.code(res.status).send(res.body);
+    } catch (err) {
+      req.log.error({ err }, 'agents import: goldfish unavailable');
+      return reply.code(502).send({ error: 'goldfish_unavailable' });
+    }
+  });
   app.put(
     '/api/agents/profile',
     proxy('PUT', () => '/profile'),
