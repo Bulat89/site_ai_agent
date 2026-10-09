@@ -7,6 +7,7 @@ import Fastify, {
 import { accessOf, goldfishUserId } from './access.js';
 import { isSecure } from './config.js';
 import { openExtension } from './extension.js';
+import { renderHelp } from './pages/help.js';
 import { renderNotFound, renderPage, type Notice } from './pages/page.js';
 import {
   renderAgents,
@@ -88,6 +89,15 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       .type('text/html; charset=utf-8')
       .header('cache-control', 'private, no-store')
       .send(renderPage({ ...view, user, access: user ? accessOf(user) : null, notice }));
+  });
+
+  // The guide is public: it also answers «how does it work» before signing in.
+  app.get('/help', async (req, reply) => {
+    const user = await sessions.user(req);
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'private, no-cache')
+      .send(renderHelp({ ...view, user }));
   });
 
   // ---------------------------------------------------------------- Yandex ID
@@ -255,6 +265,10 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
   app.post(
     '/api/agents/hook-token',
     proxy('POST', () => '/hook-token'),
+  );
+  app.post(
+    '/api/agents/duties/:id/run',
+    proxy('POST', (req) => `/duties/${id(req)}/run`),
   );
   app.put(
     '/api/agents/profile',

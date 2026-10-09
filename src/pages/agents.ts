@@ -1,5 +1,5 @@
 import type { UserRecord } from '../store/types.js';
-import { esc, header, layout, type View } from './page.js';
+import { esc, header, helpLink, layout, type View } from './page.js';
 
 /** What the Goldfish server returns about the owner's property (GET …/hotel). */
 export interface HotelView {
@@ -137,6 +137,53 @@ function kpiTiles(k: KpiView | null): string {
     .join('')}</div>`;
 }
 
+/**
+ * «Первые шаги»: what is left before the agents can work, each with a link to the place to do
+ * it and to the guide. Hidden once everything is done.
+ */
+function firstSteps(h: HotelView): string {
+  const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
+  const steps: Array<{ done: boolean; title: string; href: string; help: string }> = [
+    {
+      done: !!h.profile.name && rooms.length > 0,
+      title: 'Заполните эталон: название и номера',
+      href: '#profile-title',
+      help: 'rooms',
+    },
+    {
+      done: (h.profile.systems ?? []).length > 0,
+      title: 'Добавьте в эталон PMS и площадки',
+      href: '#profile-title',
+      help: 'systems',
+    },
+    {
+      done: h.settings.agents.some((a) => a.enabled),
+      title: 'Включите агентов — начните с «Каналов продаж»',
+      href: '#team-title',
+      help: 'agent-on',
+    },
+    {
+      done: h.telegramLinked,
+      title: 'Привяжите Telegram для сводки и согласований',
+      href: '#telegram-title',
+      help: 'tg-link',
+    },
+  ];
+  const left = steps.filter((x) => !x.done).length;
+  if (!left) return '';
+  return `<section class="card steps-card" aria-labelledby="first-title">
+    <div class="card__head"><h2 id="first-title">Первые шаги · осталось ${left} из ${steps.length}</h2>${helpLink('topic-start', 'Вся инструкция')}</div>
+    <ol class="checklist">
+${steps
+  .map(
+    (x) =>
+      `      <li class="${x.done ? 'checklist__done' : ''}"><span class="checklist__mark" aria-hidden="true">${x.done ? '✓' : ''}</span><span>${x.done ? `${esc(x.title)}<span class="visually-hidden"> — готово</span>` : `<a href="${x.href}">${esc(x.title)}</a> ${helpLink(x.help, 'как?')}`}</span></li>`,
+  )
+  .join('\n')}
+    </ol>
+  </section>`;
+}
+
 function approvalsBlock(list: ApprovalView[], agents: Map<string, string>): string {
   if (!list.length) return `<p class="hint">Ничего не ждёт вашего решения.</p>`;
   return list
@@ -178,6 +225,28 @@ function levelSelect(d: HotelView['settings']['agents'][number]['duties'][number
     .join('')}</select>`;
 }
 
+/**
+ * «Выполнить» gives the duty to its agent now. A duty that is off is not run: the server answers
+ * with a request for permission, and the page shows it (see the permission dialog).
+ */
+function runButton(d: HotelView['settings']['agents'][number]['duties'][number]): string {
+  if (d.alwaysOn) return '';
+  return `<br><button class="btn btn--ghost btn--xs duty__run" type="button" data-act="run" data-duty="${esc(d.id)}" data-title="${esc(d.title)}">Выполнить</button>`;
+}
+
+/** The agent asks the owner before running a duty that is off; without an answer nothing runs. */
+function permissionDialog(): string {
+  return `<dialog class="permission" data-permission aria-labelledby="permission-title">
+  <h2 id="permission-title">Нужно ваше разрешение</h2>
+  <p class="permission__text" data-permission-text></p>
+  <div class="row">
+    <button class="btn btn--accent btn--sm" type="button" data-grant="once">Разрешить один раз</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-grant="always">Разрешить всегда</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-grant="no">Не выполнять</button>
+  </div>
+</dialog>`;
+}
+
 function agentCard(a: HotelView['settings']['agents'][number], wave: number): string {
   return `<article class="agent${a.enabled ? ' agent--on' : ''}">
   <header class="agent__head">
@@ -194,7 +263,7 @@ function agentCard(a: HotelView['settings']['agents'][number], wave: number): st
 ${a.duties
   .map(
     (d) => `      <tr class="${d.enabled ? '' : 'duty--off'}">
-        <td><span title="${esc(d.does)}">${esc(d.title)}</span>${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}${!d.enabled && d.reason ? `<br><span class="muted">${esc(d.reason)}</span>` : ''}</td>
+        <td><span title="${esc(d.does)}">${esc(d.title)}</span>${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}${!d.enabled && d.reason ? `<br><span class="muted">${esc(d.reason)}</span>` : ''}${runButton(d)}</td>
         <td>${esc(d.when)}</td>
         <td>${levelSelect(d)}</td>
       </tr>`,
@@ -355,18 +424,20 @@ export function renderAgents(s: AgentsState): string {
     <div class="hero__text">
       <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
       <h1>${name ? esc(name) : 'Ваш объект'}</h1>
-      <p class="lead">Управляющий и пять агентов. Права у каждой обязанности — «Сам», «Правило» или «Согласование»; выключить можно агента, обязанность, площадку или поставить паузу.</p>
+      <p class="lead">Управляющий и пять агентов. Права у каждой обязанности — «Сам», «Правило» или «Согласование»; выключить можно агента, обязанность, площадку или поставить паузу. Выключенную обязанность агент выполнит только с вашего разрешения.</p>
     </div>
   </section>
   ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
   <p class="error" data-page-error role="alert" hidden></p>
+  <p class="notice" data-page-status role="status" hidden></p>
+  ${firstSteps(h)}
   ${kpiTiles(s.kpi)}
   <section class="card" aria-labelledby="approvals-title">
-    <h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>
+    <div class="card__head"><h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
     ${approvalsBlock(s.approvals, agents)}
   </section>
   <section class="card" aria-labelledby="launch-title">
-    <h2 id="launch-title">Запуск</h2>
+    <div class="card__head"><h2 id="launch-title">Запуск</h2>${helpLink('waves', 'Что такое волны?')}</div>
     <div class="row">
       <label class="field"><span class="field__label">Волна</span><select data-act="wave" aria-label="Волна">${[
         1, 2, 3,
@@ -385,37 +456,39 @@ export function renderAgents(s: AgentsState): string {
     <p class="hint">На паузе записи на площадках и сообщения ждут, чтение и сводка идут.</p>
   </section>
   <section aria-labelledby="team-title">
-    <h2 id="team-title" class="section-title">Команда</h2>
+    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2>${helpLink('levels', 'Что значат права?')}</div>
+    <p class="hint">«Выполнить» — дать задание сейчас. Если обязанность выключена, агент спросит разрешение. ${helpLink('permission', 'Подробнее')}</p>
     <div class="agents__grid">
 ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
     </div>
   </section>
   <section class="cabinet">
     <article class="card">
-      <h2>Площадки</h2>
+      <div class="card__head"><h2 id="platforms-title">Площадки</h2>${helpLink('platforms', 'Режимы')}</div>
       ${platformsBlock(h)}
     </article>
     <article class="card">
-      <h2>Управляющий и Telegram</h2>
+      <div class="card__head"><h2 id="telegram-title">Управляющий и Telegram</h2>${helpLink('tg-commands', 'Команды')}</div>
       ${telegramBlock(h)}
       ${ownerForm(h)}
     </article>
   </section>
   <section class="card" aria-labelledby="profile-title">
-    <h2 id="profile-title">Эталон объекта</h2>
+    <div class="card__head"><h2 id="profile-title">Эталон объекта</h2>${helpLink('profile-fill', 'Как заполнить?')}</div>
     <p class="hint">Единый источник правды для всех агентов: по нему сверяются карточки и сайт, из него собираются ответы гостям.</p>
     ${profileForm(h)}
   </section>
   <section class="cabinet">
     <article class="card">
-      <h2>Сообщения управляющего</h2>
+      <h2 id="feed-title">Сообщения управляющего</h2>
       ${feedBlock(s.feed)}
     </article>
     <article class="card">
-      <h2>Вебхуки объекта</h2>
+      <div class="card__head"><h2 id="hooks-title">Вебхуки объекта</h2>${helpLink('mail', 'Зачем они?')}</div>
       ${hookBlock(s.goldfishUrl)}
     </article>
   </section>
+  ${permissionDialog()}
 </main>`,
   );
 }

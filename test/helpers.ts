@@ -293,6 +293,23 @@ export class Fakes {
           status: body.decision === 'reject' ? 'rejected' : 'approved',
         });
       }
+      if (method === 'POST' && sub === '/duties/channels.sync/run') {
+        if (!body.grant)
+          return json({
+            status: 'нужно разрешение: агент выключен',
+            permission: {
+              duty: 'channels.sync',
+              dutyTitle: 'Сверка цен и наличия',
+              agent: 'channels',
+              agentTitle: 'Каналы продаж',
+              reason: 'агент выключен',
+              level: 'self',
+              changes: [{ op: 'agent', agent: 'channels', enabled: true }],
+              text: 'Агент «Каналы продаж» не может выполнить «Сверка цен и наличия» без вашего разрешения: агент выключен.',
+            },
+          });
+        return json({ status: 'задание запущено' });
+      }
       if (method === 'POST' && sub === '/telegram/link')
         return json({
           code: 'ABCD2345',

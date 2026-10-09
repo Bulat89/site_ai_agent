@@ -35,6 +35,12 @@ describe('agents page', () => {
     expect(fix).toContain('<option value="rule">Правило</option>');
     expect(fix).not.toContain('value="self"');
     expect(html).not.toContain('data-duty="manager.approvals"');
+    // Every duty but the always-on ones can be given now; one that is off asks for permission.
+    expect(html).toContain(
+      'data-act="run" data-duty="channels.sync" data-title="Сверка цен и наличия">Выполнить</button>',
+    );
+    expect(html).toContain('<dialog class="permission" data-permission');
+    expect(html).toContain('Разрешить один раз');
     expect(html).toContain('включится в волне 2');
     // Approvals, text escaped.
     expect(html).toContain('Исправить расхождения на площадках: 2');
@@ -150,6 +156,29 @@ describe('agents page', () => {
       headers: origin,
     });
     expect(hook.json().events).toBe('/hotel/hooks/gfh_x/events');
+
+    // A duty that is off: Goldfish asks for permission; the run happens only with a grant.
+    const ask = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/duties/channels.sync/run',
+      cookies,
+      payload: {},
+      headers: origin,
+    });
+    expect(ask.json().permission.reason).toBe('агент выключен');
+    const once = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/duties/channels.sync/run',
+      cookies,
+      payload: { grant: 'once' },
+      headers: origin,
+    });
+    expect(once.json().status).toBe('задание запущено');
+    expect(t.fakes.hotelCalls.at(-1)).toEqual({
+      method: 'POST',
+      path: 'yandex:1000001 /duties/channels.sync/run',
+      body: { grant: 'once' },
+    });
 
     t.fakes.goldfishDown = true;
     const down = await t.app.inject({
