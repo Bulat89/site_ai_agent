@@ -19,6 +19,10 @@ interface PageState extends View {
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/** «Как это сделать?» next to a place on the site: the guide's answer about it (/help#id). */
+export const helpLink = (id: string, text = 'Как это сделать?') =>
+  `<a class="help-link" href="/help#${esc(id)}">${esc(text)}</a>`;
+
 const NOTICE_TEXT: Record<Notice, string> = {
   login_denied: 'Вход отменён. Чтобы получить доступ, разрешите сайту доступ к профилю Яндекс ID.',
   login_expired: 'Ссылка для входа устарела. Нажмите «Войти» ещё раз.',
@@ -77,6 +81,10 @@ export function header(user: UserRecord | null): string {
     : `<a class="btn btn--ghost btn--sm" href="/auth/yandex">Войти</a>`;
   return `<header class="top wrap">
   <a class="brand" href="/">${LOGO}<span>Goldfish</span></a>
+  <nav class="top__nav" aria-label="Разделы">
+    ${user ? `<a href="/agents">Агенты</a>` : ''}
+    <a href="/help">Инструкция</a>
+  </nav>
   ${right}
 </header>`;
 }
@@ -268,6 +276,7 @@ function guest(): string {
     <p class="lead">Шесть агентов-сотрудников сверяют цены и брони на площадках, отвечают гостям за минуты, следят за отзывами и рекламой. Управляющий присылает в Telegram короткую сводку и кнопки согласований — решения остаются за вами.</p>
     <div class="cta">
       <a class="btn btn--yandex" href="/auth/yandex">${YANDEX_MARK}Войти с Яндекс ID</a>
+      <a class="btn btn--ghost" href="/help">Как это работает</a>
       <span class="cta__note">Ранний доступ для пилотных объектов</span>
     </div>
   </div>
@@ -308,7 +317,7 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   </div>
 </section>
 <section class="cabinet wrap" aria-label="Установка и подключение">
-  <article class="card">
+  <article class="card" id="install">
     <h2><span class="num">1</span>Установите расширение</h2>
     <a class="btn btn--accent" href="/download">Скачать расширение</a>
     <ol class="list">
@@ -317,9 +326,9 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
       <li>Нажмите «Загрузить распакованное» и выберите эту папку.</li>
       <li>Закрепите значок Goldfish на панели и нажмите на него — откроется боковая панель.</li>
     </ol>
-    <p class="hint">Нужен Chrome 116+ или другой браузер на Chromium: Яндекс Браузер, Edge.</p>
+    <p class="hint">Нужен Chrome 116+ или другой браузер на Chromium: Яндекс Браузер, Edge. ${helpLink('install', 'Подробная инструкция')}</p>
   </article>
-  <article class="card">
+  <article class="card" id="connect">
     <h2><span class="num">2</span>Подключите к серверу</h2>
     <p>Вставьте в боковой панели расширения:</p>
     <label class="field">
@@ -333,12 +342,15 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
       <p class="error" id="token-error" role="alert" hidden></p>
       ${issued}
     </div>
-    <p class="hint">Нажмите «Сохранить» — индикатор «Подключено» значит, что агенты могут работать в вашем браузере.</p>
+    <p class="hint">Нажмите «Сохранить» — индикатор «Подключено» значит, что агенты могут работать в вашем браузере. ${helpLink('indicator', 'Что значат другие надписи?')}</p>
   </article>
   <article class="card card--wide">
     <h2><span class="num">3</span>Настройте агентов объекта</h2>
     <p>Заполните эталон объекта, включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
-    <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
+    <div class="row">
+      <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
+      <a class="btn btn--ghost" href="/help">Инструкция по всем сценариям</a>
+    </div>
   </article>
 </section>`;
 }

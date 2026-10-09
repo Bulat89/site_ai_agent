@@ -1,5 +1,5 @@
 import type { UserRecord } from '../store/types.js';
-import { esc, header, layout, type View } from './page.js';
+import { esc, header, helpLink, layout, type View } from './page.js';
 
 /** What the Goldfish server returns about the owner's property (GET …/hotel). */
 export interface HotelView {
@@ -135,6 +135,53 @@ function kpiTiles(k: KpiView | null): string {
         `<div class="tile"><span class="tile__label">${esc(t)}</span><b>${esc(v)}</b></div>`,
     )
     .join('')}</div>`;
+}
+
+/**
+ * «Первые шаги»: what is left before the agents can work, each with a link to the place to do
+ * it and to the guide. Hidden once everything is done.
+ */
+function firstSteps(h: HotelView): string {
+  const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
+  const steps: Array<{ done: boolean; title: string; href: string; help: string }> = [
+    {
+      done: !!h.profile.name && rooms.length > 0,
+      title: 'Заполните эталон: название и номера',
+      href: '#profile-title',
+      help: 'rooms',
+    },
+    {
+      done: (h.profile.systems ?? []).length > 0,
+      title: 'Добавьте в эталон PMS и площадки',
+      href: '#profile-title',
+      help: 'systems',
+    },
+    {
+      done: h.settings.agents.some((a) => a.enabled),
+      title: 'Включите агентов — начните с «Каналов продаж»',
+      href: '#team-title',
+      help: 'agent-on',
+    },
+    {
+      done: h.telegramLinked,
+      title: 'Привяжите Telegram для сводки и согласований',
+      href: '#telegram-title',
+      help: 'tg-link',
+    },
+  ];
+  const left = steps.filter((x) => !x.done).length;
+  if (!left) return '';
+  return `<section class="card steps-card" aria-labelledby="first-title">
+    <div class="card__head"><h2 id="first-title">Первые шаги · осталось ${left} из ${steps.length}</h2>${helpLink('topic-start', 'Вся инструкция')}</div>
+    <ol class="checklist">
+${steps
+  .map(
+    (x) =>
+      `      <li class="${x.done ? 'checklist__done' : ''}"><span class="checklist__mark" aria-hidden="true">${x.done ? '✓' : ''}</span><span>${x.done ? `${esc(x.title)}<span class="visually-hidden"> — готово</span>` : `<a href="${x.href}">${esc(x.title)}</a> ${helpLink(x.help, 'как?')}`}</span></li>`,
+  )
+  .join('\n')}
+    </ol>
+  </section>`;
 }
 
 function approvalsBlock(list: ApprovalView[], agents: Map<string, string>): string {
@@ -383,13 +430,14 @@ export function renderAgents(s: AgentsState): string {
   ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
   <p class="error" data-page-error role="alert" hidden></p>
   <p class="notice" data-page-status role="status" hidden></p>
+  ${firstSteps(h)}
   ${kpiTiles(s.kpi)}
   <section class="card" aria-labelledby="approvals-title">
-    <h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>
+    <div class="card__head"><h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
     ${approvalsBlock(s.approvals, agents)}
   </section>
   <section class="card" aria-labelledby="launch-title">
-    <h2 id="launch-title">Запуск</h2>
+    <div class="card__head"><h2 id="launch-title">Запуск</h2>${helpLink('waves', 'Что такое волны?')}</div>
     <div class="row">
       <label class="field"><span class="field__label">Волна</span><select data-act="wave" aria-label="Волна">${[
         1, 2, 3,
@@ -408,34 +456,35 @@ export function renderAgents(s: AgentsState): string {
     <p class="hint">На паузе записи на площадках и сообщения ждут, чтение и сводка идут.</p>
   </section>
   <section aria-labelledby="team-title">
-    <h2 id="team-title" class="section-title">Команда</h2>
+    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2>${helpLink('levels', 'Что значат права?')}</div>
+    <p class="hint">«Выполнить» — дать задание сейчас. Если обязанность выключена, агент спросит разрешение. ${helpLink('permission', 'Подробнее')}</p>
     <div class="agents__grid">
 ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
     </div>
   </section>
   <section class="cabinet">
     <article class="card">
-      <h2>Площадки</h2>
+      <div class="card__head"><h2 id="platforms-title">Площадки</h2>${helpLink('platforms', 'Режимы')}</div>
       ${platformsBlock(h)}
     </article>
     <article class="card">
-      <h2>Управляющий и Telegram</h2>
+      <div class="card__head"><h2 id="telegram-title">Управляющий и Telegram</h2>${helpLink('tg-commands', 'Команды')}</div>
       ${telegramBlock(h)}
       ${ownerForm(h)}
     </article>
   </section>
   <section class="card" aria-labelledby="profile-title">
-    <h2 id="profile-title">Эталон объекта</h2>
+    <div class="card__head"><h2 id="profile-title">Эталон объекта</h2>${helpLink('profile-fill', 'Как заполнить?')}</div>
     <p class="hint">Единый источник правды для всех агентов: по нему сверяются карточки и сайт, из него собираются ответы гостям.</p>
     ${profileForm(h)}
   </section>
   <section class="cabinet">
     <article class="card">
-      <h2>Сообщения управляющего</h2>
+      <h2 id="feed-title">Сообщения управляющего</h2>
       ${feedBlock(s.feed)}
     </article>
     <article class="card">
-      <h2>Вебхуки объекта</h2>
+      <div class="card__head"><h2 id="hooks-title">Вебхуки объекта</h2>${helpLink('mail', 'Зачем они?')}</div>
       ${hookBlock(s.goldfishUrl)}
     </article>
   </section>

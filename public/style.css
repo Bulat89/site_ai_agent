@@ -929,3 +929,245 @@ h1 {
 [data-page-status][hidden] {
   display: none;
 }
+
+/* ---------------------------------------------------------------- navigation and help links */
+
+.top__nav {
+  display: flex;
+  gap: 4px 16px;
+  margin-left: auto;
+  font-weight: 600;
+  font-size: 15px;
+}
+.top__nav a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 6px 2px;
+}
+.top__nav a:hover {
+  color: var(--accent);
+}
+@media (max-width: 719px) {
+  .top {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .top__nav {
+    order: 3;
+    width: 100%;
+    margin: -8px 0 8px;
+  }
+}
+.help-link {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-bottom: 20px;
+}
+.card__head h2,
+.card__head .section-title {
+  margin-bottom: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- first steps */
+
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.checklist li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: start;
+  gap: 10px;
+}
+.checklist__mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+}
+.checklist__done {
+  color: var(--muted);
+}
+.checklist__done .checklist__mark {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--surface);
+}
+
+/* ---------------------------------------------------------------- guide */
+
+.guide {
+  display: grid;
+  gap: 24px;
+  padding-bottom: 48px;
+}
+.quick {
+  list-style: none;
+  counter-reset: quick;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+@media (min-width: 720px) {
+  .quick {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.quick li {
+  counter-increment: quick;
+}
+.quick a {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  height: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+.quick a:hover {
+  border-color: var(--accent);
+}
+.quick a::before {
+  content: counter(quick);
+  grid-row: span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+.quick span {
+  font-size: 14px;
+  color: var(--muted);
+}
+.guide-search .field {
+  margin-bottom: 0;
+}
+.guide-search input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.guide-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.guide-toc .chip {
+  color: var(--text);
+  text-decoration: none;
+}
+.guide-toc .chip:hover {
+  border-color: var(--accent);
+}
+.guide-topic {
+  display: grid;
+  gap: 8px;
+  scroll-margin-top: 16px;
+}
+.guide-topic .section-lead {
+  margin: 0 0 8px;
+}
+.guide-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  scroll-margin-top: 16px;
+}
+.guide-item[hidden],
+.guide-topic[hidden],
+[data-guide-empty][hidden] {
+  display: none;
+}
+.guide-item summary {
+  cursor: pointer;
+  padding: 14px 18px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.guide-item summary:hover {
+  color: var(--accent);
+}
+.guide-item[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+.guide-item__body {
+  padding: 4px 18px 18px;
+  overflow-x: auto;
+}
+.guide-item__body .list {
+  margin-top: 12px;
+}
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 0;
+  font-size: 15px;
+}
+.guide-table th,
+.guide-table td {
+  padding: 8px 12px 8px 0;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.guide-table th {
+  width: 38%;
+  font-weight: 600;
+}
+.guide-code {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font:
+    13px/1.5 ui-monospace,
+    'SF Mono',
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.guide-item__body code {
+  overflow-wrap: anywhere;
+}

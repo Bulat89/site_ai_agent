@@ -188,6 +188,24 @@ document.querySelectorAll('select[data-act="level"]').forEach((select) =>
   ),
 );
 
+// What to do next after a run status, in plain words (the guide explains every status).
+const STATUS_HINTS = [
+  [/^на согласовании/, 'Подтвердите его в разделе «Ждут решения» выше.'],
+  [/расширение ещё ни разу/, 'Установите и подключите расширение — шаги в кабинете.'],
+  [
+    /нет подключённых систем/,
+    'Добавьте нужные площадки в эталон объекта (раздел «Системы и площадки»).',
+  ],
+  [/^пауза/, 'Изменения выполнятся, когда закончится пауза (раздел «Запуск»).'],
+  [/^задание запущено/, 'Агент работает в вашем браузере — держите его открытым.'],
+  [/^ошибка/, 'Попробуйте позже. Если повторяется — напишите нам с текстом ошибки.'],
+];
+
+function statusHint(status) {
+  const hit = STATUS_HINTS.find(([re]) => re.test(status || ''));
+  return hit ? ` ${hit[1]}` : '';
+}
+
 // «Выполнить»: a duty that is off is not run — the agent asks for permission first, and nothing
 // happens until the owner answers: once (the switches stay), always (switch on and run) or no.
 const permission = document.querySelector('[data-permission]');
@@ -233,9 +251,10 @@ document.querySelectorAll('[data-act="run"]').forEach((button) =>
           data.warnings && data.warnings.length
             ? `\nУправляющий предупреждает: ${data.warnings.join(' ')}`
             : '';
-        if (grant === 'always') return reloadWith(`«${title}»: ${data.status}.${warnings}`);
+        if (grant === 'always')
+          return reloadWith(`«${title}»: ${data.status}.${statusHint(data.status)}${warnings}`);
       }
-      showStatus(`«${title}»: ${data.status}.`);
+      showStatus(`«${title}»: ${data.status}.${statusHint(data.status)}`);
       button.disabled = false;
     }),
   ),
@@ -423,4 +442,44 @@ if (profileForm) {
       error.hidden = false;
     }
   });
+}
+
+// ---------------------------------------------------------------- guide
+// Search filters the questions as you type; a link to /help#<id> opens that answer.
+
+const guideSearch = document.querySelector('[data-guide-search]');
+
+function openFromHash() {
+  const id = decodeURIComponent(location.hash.slice(1));
+  if (!id) return;
+  const target = document.getElementById(id);
+  if (target && target.tagName === 'DETAILS') {
+    target.open = true;
+    target.scrollIntoView({ block: 'start' });
+  }
+}
+
+if (guideSearch) {
+  const items = [...document.querySelectorAll('.guide-item')];
+  const topics = [...document.querySelectorAll('.guide-topic')];
+  const empty = document.querySelector('[data-guide-empty]');
+  const norm = (s) => s.toLowerCase().replace(/ё/g, 'е');
+  const texts = new Map(items.map((d) => [d, norm(d.textContent)]));
+
+  guideSearch.addEventListener('input', () => {
+    const words = norm(guideSearch.value).split(/\s+/).filter(Boolean);
+    let shown = 0;
+    for (const d of items) {
+      const hit = words.every((w) => texts.get(d).includes(w));
+      d.hidden = !hit;
+      // While searching, open the matches so the answer is visible at once.
+      d.open = words.length > 0 && hit;
+      if (hit) shown++;
+    }
+    for (const t of topics) t.hidden = !t.querySelector('.guide-item:not([hidden])');
+    empty.hidden = shown > 0;
+  });
+
+  window.addEventListener('hashchange', openFromHash);
+  openFromHash();
 }
