@@ -117,6 +117,36 @@ async function changeSettings(changes) {
   location.reload();
 }
 
+const pageStatus = document.querySelector('[data-page-status]');
+const FLASH_KEY = 'agents:flash';
+
+function showStatus(message) {
+  if (!pageStatus) return alert(message);
+  pageStatus.textContent = message;
+  pageStatus.hidden = false;
+  pageStatus.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// A message that survives the reload after a change (the page is re-rendered by the server).
+try {
+  const flash = sessionStorage.getItem(FLASH_KEY);
+  if (flash) {
+    sessionStorage.removeItem(FLASH_KEY);
+    showStatus(flash);
+  }
+} catch {
+  // Storage blocked: the message is just not shown after the reload.
+}
+
+function reloadWith(message) {
+  try {
+    sessionStorage.setItem(FLASH_KEY, message);
+  } catch {
+    alert(message);
+  }
+  location.reload();
+}
+
 function guarded(fn) {
   return (event) => {
     const el = event.currentTarget || event.target;
@@ -154,6 +184,59 @@ document.querySelectorAll('select[data-act="level"]').forEach((select) =>
               { op: 'level', duty, level },
             ];
       await changeSettings(changes);
+    }),
+  ),
+);
+
+// «Выполнить»: a duty that is off is not run — the agent asks for permission first, and nothing
+// happens until the owner answers: once (the switches stay), always (switch on and run) or no.
+const permission = document.querySelector('[data-permission]');
+
+function askPermission(text) {
+  if (!permission || typeof permission.showModal !== 'function')
+    return Promise.resolve(confirm(`${text}\n\nРазрешить один раз?`) ? 'once' : 'no');
+  permission.querySelector('[data-permission-text]').textContent = text;
+  return new Promise((resolve) => {
+    const buttons = permission.querySelectorAll('[data-grant]');
+    const done = (answer) => {
+      buttons.forEach((b) => b.removeEventListener('click', onClick));
+      permission.removeEventListener('cancel', onCancel);
+      if (permission.open) permission.close();
+      resolve(answer);
+    };
+    const onClick = (event) => done(event.currentTarget.getAttribute('data-grant'));
+    const onCancel = () => done('no');
+    buttons.forEach((b) => b.addEventListener('click', onClick));
+    permission.addEventListener('cancel', onCancel);
+    permission.showModal();
+  });
+}
+
+document.querySelectorAll('[data-act="run"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      const duty = button.getAttribute('data-duty');
+      const title = button.getAttribute('data-title');
+      const path = `/api/agents/duties/${encodeURIComponent(duty)}/run`;
+      button.disabled = true;
+      let data = await agentsCall('POST', path);
+      if (data.permission) {
+        const grant = await askPermission(data.permission.text);
+        if (grant === 'no') {
+          showStatus(`«${title}» не выполнена: нет разрешения.`);
+          button.disabled = false;
+          return;
+        }
+        data = await agentsCall('POST', path, { grant });
+        const warnings =
+          data.warnings && data.warnings.length
+            ? `\nУправляющий предупреждает: ${data.warnings.join(' ')}`
+            : '';
+        if (grant === 'always') return reloadWith(`«${title}»: ${data.status}.${warnings}`);
+      }
+      showStatus(`«${title}»: ${data.status}.`);
+      button.disabled = false;
     }),
   ),
 );

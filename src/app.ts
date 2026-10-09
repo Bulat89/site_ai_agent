@@ -256,6 +256,10 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     '/api/agents/hook-token',
     proxy('POST', () => '/hook-token'),
   );
+  app.post(
+    '/api/agents/duties/:id/run',
+    proxy('POST', (req) => `/duties/${id(req)}/run`),
+  );
   app.put(
     '/api/agents/profile',
     proxy('PUT', () => '/profile'),

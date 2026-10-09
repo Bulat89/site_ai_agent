@@ -867,6 +867,35 @@ h1 {
   width: 150px;
   padding-right: 0;
 }
+.duty__run {
+  margin-top: 6px;
+}
+.btn--xs {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.permission {
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.permission::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+.permission h2 {
+  margin: 0 0 12px;
+  font-size: 19px;
+}
+.permission__text {
+  margin: 0 0 16px;
+  white-space: pre-line;
+}
 .duty--off td:first-child {
   color: var(--muted);
 }
@@ -896,6 +925,7 @@ h1 {
 [data-hook][hidden],
 [data-telegram][hidden],
 [data-error][hidden],
-[data-page-error][hidden] {
+[data-page-error][hidden],
+[data-page-status][hidden] {
   display: none;
 }

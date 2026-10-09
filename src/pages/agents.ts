@@ -178,6 +178,28 @@ function levelSelect(d: HotelView['settings']['agents'][number]['duties'][number
     .join('')}</select>`;
 }
 
+/**
+ * «Выполнить» gives the duty to its agent now. A duty that is off is not run: the server answers
+ * with a request for permission, and the page shows it (see the permission dialog).
+ */
+function runButton(d: HotelView['settings']['agents'][number]['duties'][number]): string {
+  if (d.alwaysOn) return '';
+  return `<br><button class="btn btn--ghost btn--xs duty__run" type="button" data-act="run" data-duty="${esc(d.id)}" data-title="${esc(d.title)}">Выполнить</button>`;
+}
+
+/** The agent asks the owner before running a duty that is off; without an answer nothing runs. */
+function permissionDialog(): string {
+  return `<dialog class="permission" data-permission aria-labelledby="permission-title">
+  <h2 id="permission-title">Нужно ваше разрешение</h2>
+  <p class="permission__text" data-permission-text></p>
+  <div class="row">
+    <button class="btn btn--accent btn--sm" type="button" data-grant="once">Разрешить один раз</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-grant="always">Разрешить всегда</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-grant="no">Не выполнять</button>
+  </div>
+</dialog>`;
+}
+
 function agentCard(a: HotelView['settings']['agents'][number], wave: number): string {
   return `<article class="agent${a.enabled ? ' agent--on' : ''}">
   <header class="agent__head">
@@ -194,7 +216,7 @@ function agentCard(a: HotelView['settings']['agents'][number], wave: number): st
 ${a.duties
   .map(
     (d) => `      <tr class="${d.enabled ? '' : 'duty--off'}">
-        <td><span title="${esc(d.does)}">${esc(d.title)}</span>${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}${!d.enabled && d.reason ? `<br><span class="muted">${esc(d.reason)}</span>` : ''}</td>
+        <td><span title="${esc(d.does)}">${esc(d.title)}</span>${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}${!d.enabled && d.reason ? `<br><span class="muted">${esc(d.reason)}</span>` : ''}${runButton(d)}</td>
         <td>${esc(d.when)}</td>
         <td>${levelSelect(d)}</td>
       </tr>`,
@@ -355,11 +377,12 @@ export function renderAgents(s: AgentsState): string {
     <div class="hero__text">
       <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
       <h1>${name ? esc(name) : 'Ваш объект'}</h1>
-      <p class="lead">Управляющий и пять агентов. Права у каждой обязанности — «Сам», «Правило» или «Согласование»; выключить можно агента, обязанность, площадку или поставить паузу.</p>
+      <p class="lead">Управляющий и пять агентов. Права у каждой обязанности — «Сам», «Правило» или «Согласование»; выключить можно агента, обязанность, площадку или поставить паузу. Выключенную обязанность агент выполнит только с вашего разрешения.</p>
     </div>
   </section>
   ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
   <p class="error" data-page-error role="alert" hidden></p>
+  <p class="notice" data-page-status role="status" hidden></p>
   ${kpiTiles(s.kpi)}
   <section class="card" aria-labelledby="approvals-title">
     <h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>
@@ -416,6 +439,7 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
       ${hookBlock(s.goldfishUrl)}
     </article>
   </section>
+  ${permissionDialog()}
 </main>`,
   );
 }
