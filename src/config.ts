@@ -38,6 +38,14 @@ const EnvSchema = z
     /** Goldfish client (company) that owns site users; found or created by name when unset. */
     GOLDFISH_CLIENT_ID: z.string().optional(),
     GOLDFISH_CLIENT_NAME: z.string().min(1).max(200).default('Сайт'),
+    /**
+     * Warnings and errors of the site go to the error journal of the Goldfish server (read and
+     * fixed there over MCP together with the server's own).
+     */
+    REPORT_ERRORS: z
+      .enum(['true', 'false', '1', '0', 'yes', 'no'])
+      .default('true')
+      .transform((v) => v === 'true' || v === '1' || v === 'yes'),
 
     /** Extension zip to hand out; when unset or missing it is taken from GOLDFISH_URL. */
     EXTENSION_ZIP: z.string().optional(),
