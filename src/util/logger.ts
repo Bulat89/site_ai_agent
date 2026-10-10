@@ -1,9 +1,14 @@
-import { pino, type Logger } from 'pino';
+import { destination, multistream, pino, transport, type Logger } from 'pino';
 
 export type { Logger };
 
-export function createLogger(level: string, pretty = false): Logger {
-  return pino({
+/** Gets every line the logger writes (errors for the Goldfish journal); stdout gets them too. */
+export interface LogSink {
+  write(line: string): void;
+}
+
+export function createLogger(level: string, pretty = false, sink?: LogSink): Logger {
+  const options = {
     level,
     base: { service: 'goldfish-site' },
     redact: {
@@ -16,6 +21,20 @@ export function createLogger(level: string, pretty = false): Logger {
       ],
       censor: '[redacted]',
     },
-    ...(pretty ? { transport: { target: 'pino-pretty', options: { colorize: true } } } : {}),
-  });
+  };
+  if (!sink)
+    return pino({
+      ...options,
+      ...(pretty ? { transport: { target: 'pino-pretty', options: { colorize: true } } } : {}),
+    });
+  const out = pretty
+    ? transport({ target: 'pino-pretty', options: { colorize: true } })
+    : destination(1);
+  return pino(
+    options,
+    multistream([
+      { level: 'trace', stream: out },
+      { level: 'trace', stream: sink },
+    ]),
+  );
 }

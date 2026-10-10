@@ -1,4 +1,5 @@
 import type { Config } from '../config.js';
+import type { ErrorReport } from '../util/error-reports.js';
 
 export class GoldfishError extends Error {
   override readonly name = 'GoldfishError';
@@ -115,6 +116,12 @@ export class GoldfishAdmin {
       throw new GoldfishError(`${method} hotel${path}: ${res.status}`, res.status);
     const text = await res.text();
     return { status: res.status, body: (text ? JSON.parse(text) : {}) as T };
+  }
+
+  /** Errors of the site for the server's error journal. */
+  async reportErrors(events: ErrorReport[]): Promise<void> {
+    const res = await this.call('POST', '/admin/errors', { source: 'site', events });
+    if (res.status !== 202) throw new GoldfishError(`report errors: ${res.status}`, res.status);
   }
 
   /** The extension zip the Goldfish server hands out (public endpoint). */
