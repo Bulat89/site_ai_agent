@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { IMPORT_READY, PUBLIC_URL, signIn, startApp, type TestApp } from './helpers.js';
+import {
+  COMPETITORS_READY,
+  IMPORT_READY,
+  LISTINGS_READY,
+  PUBLIC_URL,
+  signIn,
+  startApp,
+  type TestApp,
+} from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
 
@@ -44,6 +52,14 @@ describe('agents page: folded team and the reference from a card', () => {
     expect(html).toContain('Дом у моря &#60;b&#62;');
     expect(html).not.toContain('Дом у моря <b>');
     expect(html).toContain('<details class="profile__manual">');
+    expect(html).not.toContain('прочитана не полностью');
+
+    // The reading stopped at a limit: the draft of what was read says so.
+    t.fakes.profileImport = { ...IMPORT_READY, partial: 'достигнут лимит шагов (60)' };
+    html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain(
+      'Карточка прочитана не полностью (достигнут лимит шагов (60)) — части полей может не быть.',
+    );
   });
 
   it('forwards the import calls for the signed-in owner; the poll needs only the session', async () => {
@@ -92,5 +108,74 @@ describe('agents page: folded team and the reference from a card', () => {
       headers: { origin: 'https://evil.test' },
     });
     expect(foreign.statusCode).toBe(403);
+  });
+});
+
+describe('agents page: listings on the platforms and competitors', () => {
+  it('offers both searches, then shows the listings with «моё» and the candidates with answers', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    let html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('data-act="listings-start"');
+    expect(html).toContain('data-act="competitors-start"');
+    expect(html).toContain('Поиск начнётся только по кнопке');
+
+    t.fakes.listings = { ...LISTINGS_READY, status: 'searching' };
+    t.fakes.competitorSearch = { ...COMPETITORS_READY, status: 'searching' };
+    html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('data-poll-url="/api/agents/listings"');
+    expect(html).toContain('data-poll-url="/api/agents/competitors"');
+
+    t.fakes.listings = LISTINGS_READY;
+    t.fakes.competitorSearch = COMPETITORS_READY;
+    html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain(
+      'data-act="listing-verdict" data-id="lst_1" data-platform="ostrovok" data-mine="1"',
+    );
+    expect(html).toContain('похоже на ваше: название совпадает, адрес совпадает');
+    expect(html).toContain('✓ подключена');
+    expect(html).toContain('data-act="listing-publish" data-id="lst_1" data-platform="avito"');
+    expect(html).toContain('не прочитано: капча');
+    expect(html).toContain('data-act="listings-sync"');
+    expect(html).toContain(
+      '<a href="https://ostrovok.ru/hotel/villa" target="_blank" rel="noopener">Вилла Роза</a>',
+    );
+    // A link that is not http(s) is shown as text; names are escaped.
+    expect(html).not.toContain('javascript:alert');
+    expect(html).toContain('Гранд &#60;Отель&#62;');
+    expect(html).toContain('data-verdict="not" aria-pressed="true"');
+  });
+
+  it('forwards the owner’s answers and polls only with the session', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    const mine = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/listings/lst_1/ostrovok',
+      cookies,
+      headers: origin,
+      payload: { mine: true },
+    });
+    expect(mine.json()).toMatchObject({ id: 'lst_1', mine: true });
+    const verdict = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/competitors/candidates/cmp_1',
+      cookies,
+      headers: origin,
+      payload: { verdict: 'direct' },
+    });
+    expect(verdict.json()).toMatchObject({
+      verdict: 'direct',
+      competitors: [{ name: 'Вилла Роза' }],
+    });
+    // Changes need this site's origin; a poll needs only the session.
+    expect(
+      (await t.app.inject({ method: 'POST', url: '/api/agents/listings', cookies })).statusCode,
+    ).toBe(403);
+    t.fakes.listings = LISTINGS_READY;
+    expect((await t.app.inject({ url: '/api/agents/listings', cookies })).json()).toMatchObject({
+      status: 'ready',
+    });
+    expect((await t.app.inject({ url: '/api/agents/listings' })).statusCode).toBe(401);
   });
 });

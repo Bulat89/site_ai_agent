@@ -155,7 +155,7 @@ function topics(goldfishUrl: string): Topic[] {
         {
           id: 'systems',
           q: 'Как подключить PMS и площадки?',
-          a: `<p>В поле «Системы и площадки» перечислите, где вы работаете, с адресом своего кабинета:</p>
+          a: `<p>Проще всего — кнопкой «Найти объявления» в блоке «Объявления на площадках»: агент найдёт ваше объявление на каждой площадке, а вы отметите свои — они сами появятся в этом поле. Вручную — перечислите в поле «Системы и площадки», где вы работаете, с адресом своего кабинета:</p>
 <pre class="guide-code">[{"id":"bnovo","url":"https://online.bnovo.ru/"},
  {"id":"ostrovok","url":"https://extranet.ostrovok.ru/","messagesUrl":"https://extranet.ostrovok.ru/messages","commissionPercent":15}]</pre>
 <table class="guide-table">
@@ -163,6 +163,7 @@ function topics(goldfishUrl: string): Topic[] {
   <tr><th>url</th><td>адрес вашего кабинета</td></tr>
   <tr><th>messagesUrl</th><td>страница сообщений гостей — для быстрых ответов</td></tr>
   <tr><th>reviewsUrl</th><td>страница отзывов</td></tr>
+  <tr><th>listingUrl</th><td>ваше объявление, как его видят гости, — с ним сверяется карточка</td></tr>
   <tr><th>commissionPercent</th><td>комиссия площадки, % — для расчёта доли прямых броней</td></tr>
 </table>
 <p>Коды: PMS — <code>bnovo</code>, <code>travelline</code>, <code>kontur_hotel</code>, <code>shelter</code>, <code>realty_calendar</code>, <code>sheet</code> (шахматка в таблице); площадки — <code>ostrovok</code>, <code>yandex_travel</code>, <code>avito</code>, <code>101hotels</code>, <code>onetwotrip</code>, <code>ozon_travel</code>, <code>roomlink</code>, <code>acase</code>, <code>alean</code>, <code>bronevik</code>, <code>hotelbook</code>; карты — <code>yandex_maps</code>, <code>2gis</code>; реклама — <code>yandex_direct</code>, <code>vk_ads</code>, <code>avito_ads</code>, <code>2gis_ads</code>, <code>ord</code>; <code>site</code> — ваш сайт.</p>

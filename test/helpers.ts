@@ -51,9 +51,110 @@ export const IMPORT_READY = {
   ],
 };
 
+export const LISTINGS_READY = {
+  id: 'lst_1',
+  status: 'ready',
+  createdAt: '2026-10-09T10:00:00.000Z',
+  platforms: [
+    {
+      platform: 'ostrovok',
+      title: 'Островок',
+      status: 'found',
+      url: 'https://ostrovok.ru/hotel/dom',
+      listingTitle: 'Дом у моря',
+      address: 'Сочи, Морская, 5',
+      rating: '4,8',
+      match: 'likely',
+      matchTitle: 'похоже на ваше',
+      why: 'название совпадает, адрес совпадает',
+      verdict: null,
+      error: null,
+      publishProposed: false,
+    },
+    {
+      platform: 'yandex_travel',
+      title: 'Яндекс Путешествия',
+      status: 'found',
+      url: 'https://travel.yandex.ru/hotels/x',
+      listingTitle: 'Дом у моря',
+      address: null,
+      rating: null,
+      match: 'unsure',
+      matchTitle: 'проверьте',
+      why: 'название совпадает, адреса для сравнения нет',
+      verdict: 'mine',
+      error: null,
+      publishProposed: false,
+    },
+    {
+      platform: 'avito',
+      title: 'Авито',
+      status: 'not_found',
+      url: null,
+      listingTitle: null,
+      address: null,
+      rating: null,
+      match: null,
+      matchTitle: null,
+      why: null,
+      verdict: null,
+      error: null,
+      publishProposed: false,
+    },
+    {
+      platform: '101hotels',
+      title: '101Hotels',
+      status: 'failed',
+      url: null,
+      listingTitle: null,
+      address: null,
+      rating: null,
+      match: null,
+      matchTitle: null,
+      why: null,
+      verdict: null,
+      error: 'капча',
+      publishProposed: false,
+    },
+  ],
+};
+
+export const COMPETITORS_READY = {
+  id: 'cms_1',
+  status: 'ready',
+  createdAt: '2026-10-09T10:00:00.000Z',
+  platforms: [{ platform: 'ostrovok', title: 'Островок', status: 'done', found: 2, error: null }],
+  found: 2,
+  candidates: [
+    {
+      id: 'cmp_1',
+      name: 'Вилла Роза',
+      url: 'https://ostrovok.ru/hotel/villa',
+      platform: 'Островок',
+      score: 0.9,
+      reasons: ['гостевой дом, как у вас', '400 м'],
+      verdict: null,
+      verdictTitle: null,
+    },
+    {
+      id: 'cmp_2',
+      name: 'Гранд <Отель>',
+      url: 'javascript:alert(1)',
+      platform: 'Островок',
+      score: 0.2,
+      reasons: ['другой тип (отель)'],
+      verdict: 'not',
+      verdictTitle: 'не конкурент',
+    },
+  ],
+  competitors: [],
+};
+
 export class Fakes {
   /** GET …/hotel/profile/import: the latest draft, if any. */
   profileImport: unknown = null;
+  listings: unknown = null;
+  competitorSearch: unknown = null;
   // Yandex
   profile: YandexProfile = {
     id: '1000001',
@@ -311,6 +412,18 @@ export class Fakes {
         });
       }
       if (method === 'GET' && sub === '/profile/import') return json(this.profileImport);
+      if (method === 'GET' && sub === '/listings') return json(this.listings);
+      if (method === 'GET' && sub === '/competitors') return json(this.competitorSearch);
+      if (method === 'POST' && sub === '/listings')
+        return json({ ...LISTINGS_READY, status: 'searching' }, 201);
+      if (method === 'POST' && sub === '/listings/lst_1/ostrovok')
+        return json({ ...LISTINGS_READY, mine: body.mine });
+      if (method === 'POST' && sub === '/competitors/candidates/cmp_1')
+        return json({
+          verdict: body.verdict,
+          note: null,
+          competitors: [{ name: 'Вилла Роза', url: 'https://ostrovok.ru/hotel/villa' }],
+        });
       if (method === 'POST' && sub === '/profile/import') {
         if (!body.url && !body.text)
           return json(
