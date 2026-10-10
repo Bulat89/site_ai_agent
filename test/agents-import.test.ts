@@ -44,6 +44,14 @@ describe('agents page: folded team and the reference from a card', () => {
     expect(html).toContain('Дом у моря &#60;b&#62;');
     expect(html).not.toContain('Дом у моря <b>');
     expect(html).toContain('<details class="profile__manual">');
+    expect(html).not.toContain('прочитана не полностью');
+
+    // The reading stopped at a limit: the draft of what was read says so.
+    t.fakes.profileImport = { ...IMPORT_READY, partial: 'достигнут лимит шагов (60)' };
+    html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain(
+      'Карточка прочитана не полностью (достигнут лимит шагов (60)) — части полей может не быть.',
+    );
   });
 
   it('forwards the import calls for the signed-in owner; the poll needs only the session', async () => {

@@ -95,6 +95,8 @@ export interface ProfileImportView {
   url: string | null;
   platform: string | null;
   error: string | null;
+  /** Read only in part (the reading stopped at a limit): why. Older servers do not send it. */
+  partial?: string | null;
   createdAt: string;
   fields: Array<{ key: string; label: string; value: string; current: string }>;
 }
@@ -364,7 +366,7 @@ function importBlock(imp: ProfileImportView | null | undefined): string {
   if (imp?.status === 'ready')
     return `<form class="import import--ready" data-form="import-apply" data-id="${esc(imp.id)}">
   <h3>Черновик из карточки${where}: найдено ${imp.fields.length}</h3>
-  <p class="hint">Отметьте, что перенести в эталон. Списки дополняются, а не заменяются; у новых номеров количество — 1, проверьте его потом в поле «Номера».</p>
+${imp.partial ? `  <p class="hint warn">Карточка прочитана не полностью (${esc(imp.partial)}) — части полей может не быть. Примените найденное и пришлите карточку ещё раз или вставьте её текст.</p>\n` : ''}  <p class="hint">Отметьте, что перенести в эталон. Списки дополняются, а не заменяются; у новых номеров количество — 1, проверьте его потом в поле «Номера».</p>
   <div class="table-scroll"><table class="duties import__table">
     <thead><tr><th><span class="visually-hidden">Перенести</span></th><th>Поле</th><th>Из карточки</th><th>Сейчас в эталоне</th></tr></thead>
     <tbody>
