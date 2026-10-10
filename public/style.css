@@ -1297,3 +1297,20 @@ h1 {
     animation-duration: 3s;
   }
 }
+.competitors {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 12px;
+}
+.competitor .hint {
+  margin: 2px 0 6px;
+}
+.verdicts .btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.ok-text {
+  color: var(--ok);
+}

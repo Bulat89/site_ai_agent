@@ -629,3 +629,121 @@ document.querySelectorAll('[data-act="import-discard"]').forEach((button) =>
     }),
   ),
 );
+
+// ---------------------------------------------------------------- after the reference
+
+// A search runs: the page asks for its state every 5 s and reloads when it is done.
+document.querySelectorAll('[data-poll-url]').forEach((box) => {
+  const url = box.getAttribute('data-poll-url');
+  const started = Date.now();
+  const tick = async () => {
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.status !== 'searching') return location.reload();
+    } catch {
+      // A network hiccup: try again on the next tick.
+    }
+    if (Date.now() - started < 30 * 60_000) setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 5000);
+});
+
+const startSearch = (path, message) =>
+  guarded(async (event) => {
+    event.currentTarget.disabled = true;
+    await agentsCall('POST', path);
+    reloadWith(message);
+  });
+
+document
+  .querySelectorAll('[data-act="listings-start"]')
+  .forEach((b) =>
+    b.addEventListener(
+      'click',
+      startSearch('/api/agents/listings', 'Агент ищет объявление на площадках.'),
+    ),
+  );
+
+document
+  .querySelectorAll('[data-act="competitors-start"]')
+  .forEach((b) =>
+    b.addEventListener(
+      'click',
+      startSearch('/api/agents/competitors', 'Агент ищет конкурентов рядом.'),
+    ),
+  );
+
+document.querySelectorAll('[data-act="listing-verdict"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      button.disabled = true;
+      const id = encodeURIComponent(button.getAttribute('data-id'));
+      const platform = encodeURIComponent(button.getAttribute('data-platform'));
+      const mine = button.getAttribute('data-mine') === '1';
+      await agentsCall('POST', `/api/agents/listings/${id}/${platform}`, { mine });
+      reloadWith(mine ? 'Площадка подключена в «Системы и площадки».' : 'Отмечено: не ваше.');
+    }),
+  ),
+);
+
+document.querySelectorAll('[data-act="listing-publish"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      button.disabled = true;
+      const id = encodeURIComponent(button.getAttribute('data-id'));
+      const platform = encodeURIComponent(button.getAttribute('data-platform'));
+      await agentsCall('POST', `/api/agents/listings/${id}/${platform}/publish`);
+      reloadWith(
+        `Размещение на площадке ${button.getAttribute('data-title')} — на согласовании: согласуйте его в списке выше или в Telegram.`,
+      );
+    }),
+  ),
+);
+
+document.querySelectorAll('[data-act="listings-sync"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      const title = button.getAttribute('data-title');
+      button.disabled = true;
+      let data = await agentsCall('POST', '/api/agents/listings/sync');
+      if (data.permission) {
+        const grant = await askPermission(data.permission.text);
+        if (grant === 'no') {
+          showStatus(`«${title}» не выполнено: нет разрешения.`);
+          button.disabled = false;
+          return;
+        }
+        data = await agentsCall('POST', '/api/agents/listings/sync', { grant });
+      }
+      reloadWith(`«${title}»: ${data.status}.${statusHint(data.status)}`);
+    }),
+  ),
+);
+
+// An answer about a candidate changes only its own row: the owner goes through the list.
+document.querySelectorAll('[data-act="competitor-verdict"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      const row = button.closest('[data-candidate]');
+      const buttons = row.querySelectorAll('[data-act="competitor-verdict"]');
+      buttons.forEach((b) => (b.disabled = true));
+      const id = encodeURIComponent(button.getAttribute('data-id'));
+      const data = await agentsCall('POST', `/api/agents/competitors/candidates/${id}`, {
+        verdict: button.getAttribute('data-verdict'),
+      });
+      buttons.forEach((b) => {
+        b.disabled = false;
+        b.setAttribute('aria-pressed', String(b === button));
+      });
+      const count = document.querySelector('[data-competitors-count]');
+      if (count && data.competitors)
+        count.textContent = `В «Конкурентах» сейчас: ${data.competitors.length}.`;
+      if (data.note) showStatus(data.note);
+    }),
+  ),
+);

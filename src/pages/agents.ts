@@ -84,7 +84,57 @@ export interface AgentsState extends View {
   feed: FeedItem[];
   /** The latest draft of the reference from a card, while it is read or waits for the owner. */
   profileImport?: ProfileImportView | null;
+  listings?: ListingSearchView | null;
+  competitorSearch?: CompetitorSearchView | null;
   error: string | null;
+}
+
+/** «Поиск объявлений на площадках» (GET …/hotel/listings). */
+export interface ListingSearchView {
+  id: string;
+  status: 'searching' | 'ready';
+  createdAt: string;
+  platforms: Array<{
+    platform: string;
+    title: string;
+    status: 'searching' | 'found' | 'not_found' | 'failed';
+    url: string | null;
+    listingTitle: string | null;
+    address: string | null;
+    rating: string | null;
+    match: 'likely' | 'unsure' | 'unlikely' | null;
+    matchTitle: string | null;
+    why: string | null;
+    verdict: 'mine' | 'not_mine' | null;
+    error: string | null;
+    publishProposed: boolean;
+  }>;
+}
+
+/** «Поиск конкурентов» (GET …/hotel/competitors). */
+export interface CompetitorSearchView {
+  id: string;
+  status: 'searching' | 'ready';
+  createdAt: string;
+  platforms: Array<{
+    platform: string;
+    title: string;
+    status: string;
+    found: number;
+    error: string | null;
+  }>;
+  found: number;
+  candidates: Array<{
+    id: string;
+    name: string;
+    url: string | null;
+    platform: string;
+    score: number;
+    reasons: string[];
+    verdict: 'direct' | 'not' | 'unsure' | null;
+    verdictTitle: string | null;
+  }>;
+  competitors: Array<{ name: string; url: string }>;
 }
 
 /** «Эталон из карточки» (GET …/hotel/profile/import). */
@@ -348,6 +398,93 @@ const PROFILE_LISTS: Array<{ key: string; title: string; example: string }> = [
   { key: 'upsells', title: 'Допродажи', example: '[{"name":"Ранний заезд","price":1000}]' },
 ];
 
+const safeUrl = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
+
+/**
+ * «Объявления на площадках»: where the property is listed. The owner marks their listings (the
+ * platform is registered in «Системы и площадки»), then checks the cards against the reference and
+ * asks to put the listing where there is none (each by approval).
+ */
+function listingsBlock(l: ListingSearchView | null | undefined): string {
+  if (!l)
+    return `<p class="hint">Агент поищет ваше объявление на всех площадках для гостей по названию и адресу из эталона. Вы отметите свои — они подключатся в «Системы и площадки».</p>
+  <button class="btn btn--accent btn--sm" type="button" data-act="listings-start">Найти объявления</button>`;
+  if (l.status === 'searching') {
+    const done = l.platforms.filter((x) => x.status !== 'searching').length;
+    return `<div class="import import--wait" data-poll-url="/api/agents/listings" role="status">
+  <span class="spinner" aria-hidden="true"></span>
+  <div><b>Агент ищет объявление: готово ${done} из ${l.platforms.length} площадок…</b><p class="hint">Площадки читаются параллельно. Страница обновится сама.</p></div>
+</div>`;
+  }
+  const row = (x: ListingSearchView['platforms'][number]) => {
+    const url = safeUrl(x.url);
+    let what = '<span class="muted">—</span>';
+    let act = '';
+    if (x.status === 'found') {
+      what = `${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.listingTitle ?? url)}</a>` : esc(x.listingTitle ?? '')}${x.address ? `<br><span class="muted">${esc(x.address)}</span>` : ''}${x.matchTitle ? `<br><span class="hint">${esc(x.matchTitle)}: ${esc(x.why ?? '')}</span>` : ''}`;
+      act =
+        x.verdict === 'mine'
+          ? '<span class="ok-text">✓ подключена</span>'
+          : x.verdict === 'not_mine'
+            ? '<span class="muted">не ваше</span>'
+            : `<span class="row row--tight"><button class="btn btn--accent btn--sm" type="button" data-act="listing-verdict" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-mine="1">Моё</button><button class="btn btn--ghost btn--sm" type="button" data-act="listing-verdict" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-mine="0">Не моё</button></span>`;
+    } else if (x.status === 'not_found') {
+      what = '<span class="muted">объявления нет</span>';
+      act = x.publishProposed
+        ? '<span class="muted">размещение на согласовании</span>'
+        : `<button class="btn btn--ghost btn--sm" type="button" data-act="listing-publish" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-title="${esc(x.title)}">Разместить</button>`;
+    } else if (x.status === 'failed')
+      what = `<span class="muted">не прочитано: ${esc(x.error ?? '')}</span>`;
+    return `      <tr><td>${esc(x.title)}</td><td>${what}</td><td>${act}</td></tr>`;
+  };
+  const mine = l.platforms.some((x) => x.verdict === 'mine');
+  return `<div class="table-scroll"><table class="duties">
+    <thead><tr><th>Площадка</th><th>Что нашёл агент</th><th><span class="visually-hidden">Действие</span></th></tr></thead>
+    <tbody>
+${l.platforms.map(row).join('\n')}
+    </tbody>
+  </table></div>
+  <div class="row">
+    ${mine ? '<button class="btn btn--accent btn--sm" type="button" data-act="listings-sync" data-title="Сверить карточки с эталоном">Сверить карточки с эталоном</button>' : ''}
+    <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">Искать заново</button>
+  </div>
+  <p class="hint">«Сверить» — агент сравнит описание, удобства и правила на площадках с эталоном и предложит правки. «Разместить» — заполнит анкету объекта по эталону; вход, документы и отправку делаете вы.</p>`;
+}
+
+const VERDICTS: Array<['direct' | 'not' | 'unsure', string]> = [
+  ['direct', 'Прямой конкурент'],
+  ['not', 'Нет'],
+  ['unsure', 'Не уверен'],
+];
+
+/**
+ * «Конкуренты»: the search starts only by the owner's button (that is the consent). The owner
+ * answers about each candidate; direct ones join «Конкуренты», every answer trains the search.
+ */
+function competitorsBlock(c: CompetitorSearchView | null | undefined, listed: number): string {
+  const start = (label: string) =>
+    `<button class="btn btn--${label === 'Найти конкурентов' ? 'accent' : 'ghost'} btn--sm" type="button" data-act="competitors-start">${label}</button>`;
+  if (!c)
+    return `<p class="hint">Агент найдёт объекты рядом, похожие по месту, типу, номерам, удобствам и цене, и покажет, чем они похожи. Вы ответите про каждый: прямой конкурент или нет — прямых будет отслеживать агент цен. Ваши ответы сохраняются и учат поиск. Поиск начнётся только по кнопке.</p>
+  ${start('Найти конкурентов')}`;
+  if (c.status === 'searching')
+    return `<div class="import import--wait" data-poll-url="/api/agents/competitors" role="status">
+  <span class="spinner" aria-hidden="true"></span>
+  <div><b>Агент ищет конкурентов: ${esc(c.platforms.map((x) => x.title).join(', '))}…</b><p class="hint">Страница обновится сама.</p></div>
+</div>`;
+  const item = (x: CompetitorSearchView['candidates'][number]) => {
+    const url = safeUrl(x.url);
+    return `    <li class="competitor" data-candidate="${esc(x.id)}">
+      <div><b>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)}</b> <span class="muted">${esc(x.platform)}</span></div>
+      <div class="hint">${esc(x.reasons.join(', '))}</div>
+      <div class="row row--tight verdicts">${VERDICTS.map(([v, label]) => `<button class="btn btn--ghost btn--sm" type="button" data-act="competitor-verdict" data-id="${esc(x.id)}" data-verdict="${v}" aria-pressed="${x.verdict === v}">${label}</button>`).join('')}</div>
+    </li>`;
+  };
+  return `${c.candidates.length ? `<p class="hint">Нашёл ${c.found}, вот самые похожие. Отметьте прямых конкурентов.</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : '<p class="hint">Похожих объектов рядом не нашлось.</p>'}
+  <p class="hint" data-competitors-count>В «Конкурентах» сейчас: ${listed}.</p>
+  ${start('Искать заново')}`;
+}
+
 /**
  * «Заполнить из карточки»: a link to the property's card on any aggregator, or its text. While
  * the agent reads it, the page waits (app.js polls); a ready draft shows the found fields next
@@ -562,6 +699,16 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
       <summary>Заполнить вручную</summary>
       ${profileForm(h)}
     </details>
+  </section>
+  <section class="cabinet" aria-label="После эталона">
+    <article class="card">
+      <div class="card__head"><h2 id="listings-title">Объявления на площадках</h2></div>
+      ${listingsBlock(s.listings)}
+    </article>
+    <article class="card">
+      <div class="card__head"><h2 id="competitors-title">Конкуренты</h2></div>
+      ${competitorsBlock(s.competitorSearch, ((h.profile.competitors as unknown[] | undefined) ?? []).length)}
+    </article>
   </section>
   <section class="cabinet">
     <article class="card">

@@ -16,6 +16,8 @@ import {
   type HotelView,
   type KpiView,
   type ProfileImportView,
+  type ListingSearchView,
+  type CompetitorSearchView,
 } from './pages/agents.js';
 import type { Services } from './services.js';
 import { registerStatic } from './static.js';
@@ -201,13 +203,16 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       error: null,
     };
     try {
-      const [hotel, approvals, kpi, feed, profileImport] = await Promise.all([
-        s.goldfish.hotel<HotelView>(gf, 'GET', ''),
-        s.goldfish.hotel<ApprovalView[]>(gf, 'GET', '/approvals?status=pending'),
-        s.goldfish.hotel<KpiView>(gf, 'GET', '/kpi'),
-        s.goldfish.hotel<FeedItem[]>(gf, 'GET', '/feed?limit=20'),
-        s.goldfish.hotel<ProfileImportView | null>(gf, 'GET', '/profile/import'),
-      ]);
+      const [hotel, approvals, kpi, feed, profileImport, listings, competitorSearch] =
+        await Promise.all([
+          s.goldfish.hotel<HotelView>(gf, 'GET', ''),
+          s.goldfish.hotel<ApprovalView[]>(gf, 'GET', '/approvals?status=pending'),
+          s.goldfish.hotel<KpiView>(gf, 'GET', '/kpi'),
+          s.goldfish.hotel<FeedItem[]>(gf, 'GET', '/feed?limit=20'),
+          s.goldfish.hotel<ProfileImportView | null>(gf, 'GET', '/profile/import'),
+          s.goldfish.hotel<ListingSearchView | null>(gf, 'GET', '/listings'),
+          s.goldfish.hotel<CompetitorSearchView | null>(gf, 'GET', '/competitors'),
+        ]);
       if (hotel.status !== 200) throw new Error(`hotel: ${hotel.status}`);
       state = {
         ...state,
@@ -216,6 +221,9 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         kpi: kpi.status === 200 ? kpi.body : null,
         feed: feed.status === 200 ? feed.body : [],
         profileImport: profileImport.status === 200 ? profileImport.body : null,
+        // An older Goldfish without the searches answers 404: the blocks offer to start them.
+        listings: listings.status === 200 ? listings.body : null,
+        competitorSearch: competitorSearch.status === 200 ? competitorSearch.body : null,
       };
     } catch (err) {
       req.log.error({ err }, 'agents page: goldfish unavailable');
@@ -304,6 +312,52 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     '/api/agents/profile',
     proxy('PUT', () => '/profile'),
   );
+  // After the reference: listings on the platforms and competitors nearby.
+  const platform = (req: FastifyRequest) =>
+    encodeURIComponent((req.params as { platform: string }).platform);
+  app.post(
+    '/api/agents/next-steps',
+    proxy('POST', () => '/next-steps'),
+  );
+  app.post(
+    '/api/agents/listings',
+    proxy('POST', () => '/listings'),
+  );
+  app.post(
+    '/api/agents/listings/sync',
+    proxy('POST', () => '/listings/sync'),
+  );
+  app.post(
+    '/api/agents/listings/:id/:platform',
+    proxy('POST', (req) => `/listings/${id(req)}/${platform(req)}`),
+  );
+  app.post(
+    '/api/agents/listings/:id/:platform/publish',
+    proxy('POST', (req) => `/listings/${id(req)}/${platform(req)}/publish`),
+  );
+  app.post(
+    '/api/agents/competitors',
+    proxy('POST', () => '/competitors'),
+  );
+  app.post(
+    '/api/agents/competitors/candidates/:id',
+    proxy('POST', (req) => `/competitors/candidates/${id(req)}`),
+  );
+  // Polled by the page while a search runs (a read: the session is enough).
+  for (const what of ['listings', 'competitors'] as const)
+    app.get(`/api/agents/${what}`, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      const user = await sessions.user(req);
+      if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
+      if (!accessOf(user).allowed) return reply.code(403).send({ error: 'no_access' });
+      try {
+        const res = await s.goldfish.hotel(goldfishUserId(user), 'GET', `/${what}`);
+        return reply.code(res.status).send(res.body);
+      } catch (err) {
+        req.log.error({ err }, 'agents search: goldfish unavailable');
+        return reply.code(502).send({ error: 'goldfish_unavailable' });
+      }
+    });
 
   app.setNotFoundHandler(async (_req, reply) =>
     reply.code(404).type('text/html; charset=utf-8').send(renderNotFound(view)),
