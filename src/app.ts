@@ -362,7 +362,13 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         const res = await s.goldfish.hotel(goldfishUserId(user), 'GET', `/${what}`);
         return reply.code(res.status).send(res.body);
       } catch (err) {
-        req.log.error({ err }, 'agents search: goldfish unavailable');
+        // Asked again in 5 s, like the card import: a Goldfish restart is a missed tick.
+        if (err instanceof GoldfishError && err.status && err.status >= 502 && err.status <= 504)
+          req.log.info(
+            { status: err.status },
+            'agents search: goldfish restarting, the page asks again',
+          );
+        else req.log.error({ err }, 'agents search: goldfish unavailable');
         return reply.code(502).send({ error: 'goldfish_unavailable' });
       }
     });

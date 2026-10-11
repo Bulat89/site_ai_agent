@@ -125,6 +125,11 @@ describe('agents page: the card is read while the Goldfish server restarts', () 
     expect(restart.map((l) => [l.level, l.msg])).toEqual([
       [30, 'agents import: goldfish restarting, the page asks again'],
     ]);
+    // The poll of a running search too.
+    expect((await t.app.inject({ url: '/api/agents/listings', cookies })).statusCode).toBe(502);
+    expect(lines.filter((l) => l.msg.startsWith('agents search:')).map((l) => l.level)).toEqual([
+      30,
+    ]);
 
     // A server that cannot be reached at all stays an error.
     t.fakes.goldfishRestarting = false;
@@ -145,17 +150,58 @@ describe('agents page: listings on the platforms and competitors', () => {
     expect(html).toContain('data-act="competitors-start"');
     expect(html).toContain('Поиск начнётся только по кнопке');
 
+    // While the search runs, what each platform found is shown at once and can be marked.
+    const [ostrovok, yandex, avito, hotels101] = LISTINGS_READY.platforms;
     t.fakes.listings = {
       ...LISTINGS_READY,
       status: 'searching',
-      platforms: LISTINGS_READY.platforms.map((x, i) => ({ ...x, recheck: i === 0 })),
+      platforms: [
+        ostrovok,
+        { ...yandex, status: 'searching', recheck: true },
+        { ...avito, status: 'searching' },
+        hotels101,
+      ],
     };
-    t.fakes.competitorSearch = { ...COMPETITORS_READY, status: 'searching' };
+    t.fakes.competitorSearch = {
+      ...COMPETITORS_READY,
+      status: 'searching',
+      platforms: [
+        ...COMPETITORS_READY.platforms,
+        {
+          platform: 'yandex_travel',
+          title: 'Яндекс Путешествия',
+          status: 'searching',
+          found: 0,
+          error: null,
+        },
+      ],
+    };
     html = (await t.app.inject({ url: '/agents', cookies })).body;
     expect(html).toContain('data-poll-url="/api/agents/listings"');
     expect(html).toContain('data-poll-url="/api/agents/competitors"');
+    // The page reloads when this changes (app.js computes the same from the poll).
+    expect(html).toContain(
+      `data-poll-state="${JSON.stringify([
+        ['found', null],
+        ['searching', null],
+        ['searching', null],
+        ['failed', null],
+      ]).replaceAll('"', '&#34;')}"`,
+    );
+    expect(html).toContain('готово 2 из 4 площадок');
+    expect(html).toContain(
+      'data-act="listing-verdict" data-id="lst_1" data-platform="ostrovok" data-mine="1"',
+    );
+    expect(html).toContain('не прочитано: капча');
     // A search again: what was found is read again by its link.
-    expect(html).toContain('Найденные раньше (1) перечитывает по ссылке, на остальных ищет.');
+    expect(html).toContain('перечитывает по ссылке…');
+    expect(html).toContain('ищет…');
+    expect(html).not.toContain('data-act="listings-start"');
+    // Candidates found so far are shown; the owner answers once every platform is read.
+    expect(html).toContain('Островок — найдено 2; Яндекс Путешествия — ищет…');
+    expect(html).toContain('Пока найдено 2, самые похожие:');
+    expect(html).toContain('Вилла Роза');
+    expect(html).not.toContain('data-act="competitor-verdict"');
 
     t.fakes.listings = LISTINGS_READY;
     t.fakes.competitorSearch = COMPETITORS_READY;

@@ -632,15 +632,20 @@ document.querySelectorAll('[data-act="import-discard"]').forEach((button) =>
 
 // ---------------------------------------------------------------- after the reference
 
-// A search runs: the page asks for its state every 5 s and reloads when it is done.
+// A search runs: the page asks for its state every 5 s and reloads when a platform is done (what
+// it found shows at once) and when the whole search is. The state is computed as on the server.
+const pollState = (data) =>
+  JSON.stringify((data.platforms ?? []).map((x) => [x.status, x.found ?? null]));
 document.querySelectorAll('[data-poll-url]').forEach((box) => {
   const url = box.getAttribute('data-poll-url');
+  const shown = box.getAttribute('data-poll-state');
   const started = Date.now();
   const tick = async () => {
     try {
       const res = await fetch(url, { credentials: 'same-origin' });
       const data = await res.json().catch(() => null);
-      if (res.ok && data && data.status !== 'searching') return location.reload();
+      if (res.ok && data && (data.status !== 'searching' || (shown && pollState(data) !== shown)))
+        return location.reload();
     } catch {
       // A network hiccup: try again on the next tick.
     }

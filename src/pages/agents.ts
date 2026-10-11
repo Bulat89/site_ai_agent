@@ -403,6 +403,14 @@ const PROFILE_LISTS: Array<{ key: string; title: string; example: string }> = [
 const safeUrl = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
 
 /**
+ * Where a running search stands: app.js computes the same from the polled state and reloads the
+ * page when it changes, so what one platform found shows up while the others are still read.
+ */
+function pollState(platforms: Array<{ status: string; found?: number }>): string {
+  return JSON.stringify(platforms.map((x) => [x.status, x.found ?? null]));
+}
+
+/**
  * «Объявления на площадках»: where the property is listed. The owner marks their listings (the
  * platform is registered in «Системы и площадки»), then checks the cards against the reference and
  * asks to put the listing where there is none (each by approval).
@@ -411,14 +419,7 @@ function listingsBlock(l: ListingSearchView | null | undefined): string {
   if (!l)
     return `<p class="hint">Агент поищет ваше объявление на всех площадках для гостей по названию и адресу из эталона. Вы отметите свои — они подключатся в «Системы и площадки».</p>
   <button class="btn btn--accent btn--sm" type="button" data-act="listings-start">Найти объявления</button>`;
-  if (l.status === 'searching') {
-    const done = l.platforms.filter((x) => x.status !== 'searching').length;
-    const rechecked = l.platforms.filter((x) => x.recheck).length;
-    return `<div class="import import--wait" data-poll-url="/api/agents/listings" role="status">
-  <span class="spinner" aria-hidden="true"></span>
-  <div><b>Агент ищет объявление: готово ${done} из ${l.platforms.length} площадок…</b><p class="hint">${rechecked ? `Найденные раньше (${rechecked}) перечитывает по ссылке, на остальных ищет. ` : ''}Площадки читаются параллельно. Страница обновится сама.</p></div>
-</div>`;
-  }
+  const searching = l.status === 'searching';
   const row = (x: ListingSearchView['platforms'][number]) => {
     const url = safeUrl(x.url);
     let what = '<span class="muted">—</span>';
@@ -438,15 +439,26 @@ function listingsBlock(l: ListingSearchView | null | undefined): string {
         : `<button class="btn btn--ghost btn--sm" type="button" data-act="listing-publish" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-title="${esc(x.title)}">Разместить</button>`;
     } else if (x.status === 'failed')
       what = `<span class="muted">не прочитано: ${esc(x.error ?? '')}</span>`;
+    else if (x.status === 'searching')
+      what = `<span class="muted">${x.recheck ? 'перечитывает по ссылке…' : 'ищет…'}</span>`;
     return `      <tr><td>${esc(x.title)}</td><td>${what}</td><td>${act}</td></tr>`;
   };
-  const mine = l.platforms.some((x) => x.verdict === 'mine');
-  return `<div class="table-scroll"><table class="duties">
+  const table = `<div class="table-scroll"><table class="duties">
     <thead><tr><th>Площадка</th><th>Что нашёл агент</th><th><span class="visually-hidden">Действие</span></th></tr></thead>
     <tbody>
 ${l.platforms.map(row).join('\n')}
     </tbody>
-  </table></div>
+  </table></div>`;
+  if (searching) {
+    const done = l.platforms.filter((x) => x.status !== 'searching').length;
+    return `<div class="import import--wait" data-poll-url="/api/agents/listings" data-poll-state="${esc(pollState(l.platforms))}" role="status">
+  <span class="spinner" aria-hidden="true"></span>
+  <div><b>Агент ищет объявление: готово ${done} из ${l.platforms.length} площадок…</b><p class="hint">Площадки читаются параллельно; что уже найдено — в таблице, отмечать можно сразу. Страница обновится сама.</p></div>
+</div>
+${table}`;
+  }
+  const mine = l.platforms.some((x) => x.verdict === 'mine');
+  return `${table}
   <div class="row">
     ${mine ? '<button class="btn btn--accent btn--sm" type="button" data-act="listings-sync" data-title="Сверить карточки с эталоном">Сверить карточки с эталоном</button>' : ''}
     <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">Обновить поиск</button>
@@ -470,19 +482,29 @@ function competitorsBlock(c: CompetitorSearchView | null | undefined, listed: nu
   if (!c)
     return `<p class="hint">Агент найдёт объекты рядом, похожие по месту, типу, номерам, удобствам и цене, и покажет, чем они похожи. Вы ответите про каждый: прямой конкурент или нет — прямых будет отслеживать агент цен. Ваши ответы сохраняются и учат поиск. Поиск начнётся только по кнопке.</p>
   ${start('Найти конкурентов')}`;
-  if (c.status === 'searching')
-    return `<div class="import import--wait" data-poll-url="/api/agents/competitors" role="status">
-  <span class="spinner" aria-hidden="true"></span>
-  <div><b>Агент ищет конкурентов: ${esc(c.platforms.map((x) => x.title).join(', '))}…</b><p class="hint">Страница обновится сама.</p></div>
-</div>`;
+  // While the search runs, what is found so far is shown without answers: the owner is asked
+  // about the best of all platforms once every platform is read.
+  const searching = c.status === 'searching';
   const item = (x: CompetitorSearchView['candidates'][number]) => {
     const url = safeUrl(x.url);
     return `    <li class="competitor" data-candidate="${esc(x.id)}">
       <div><b>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)}</b> <span class="muted">${esc(x.platform)}</span></div>
       <div class="hint">${esc(x.reasons.join(', '))}</div>
-      <div class="row row--tight verdicts">${VERDICTS.map(([v, label]) => `<button class="btn btn--ghost btn--sm" type="button" data-act="competitor-verdict" data-id="${esc(x.id)}" data-verdict="${v}" aria-pressed="${x.verdict === v}">${label}</button>`).join('')}</div>
-    </li>`;
+${searching ? '' : `      <div class="row row--tight verdicts">${VERDICTS.map(([v, label]) => `<button class="btn btn--ghost btn--sm" type="button" data-act="competitor-verdict" data-id="${esc(x.id)}" data-verdict="${v}" aria-pressed="${x.verdict === v}">${label}</button>`).join('')}</div>\n`}    </li>`;
   };
+  if (searching) {
+    const where = c.platforms
+      .map(
+        (x) =>
+          `${esc(x.title)} — ${x.status === 'searching' ? 'ищет…' : x.status === 'failed' ? `не прочитано${x.error ? `: ${esc(x.error)}` : ''}` : `найдено ${x.found}`}`,
+      )
+      .join('; ');
+    return `<div class="import import--wait" data-poll-url="/api/agents/competitors" data-poll-state="${esc(pollState(c.platforms))}" role="status">
+  <span class="spinner" aria-hidden="true"></span>
+  <div><b>Агент ищет конкурентов: ${where}</b><p class="hint">Найденное показываю сразу; ответить про каждый можно будет, когда прочитаны все площадки. Страница обновится сама.</p></div>
+</div>
+${c.candidates.length ? `<p class="hint">Пока найдено ${c.found}, самые похожие:</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : ''}`;
+  }
   return `${c.candidates.length ? `<p class="hint">Нашёл ${c.found}, вот самые похожие. Отметьте прямых конкурентов.</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : '<p class="hint">Похожих объектов рядом не нашлось.</p>'}
   <p class="hint" data-competitors-count>В «Конкурентах» сейчас: ${listed}.</p>
   ${start('Искать заново')}`;
