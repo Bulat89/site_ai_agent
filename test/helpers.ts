@@ -1,4 +1,4 @@
-import { pino } from 'pino';
+import { pino, type Logger } from 'pino';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
@@ -173,6 +173,8 @@ export class Fakes {
   readonly users = new Map<string, { displayName?: string }>();
   readonly tokens = new Map<string, { clientId: string; userId: string; revoked: boolean }>();
   goldfishDown = false;
+  /** The server is being redeployed: its proxy answers 502. */
+  goldfishRestarting = false;
   /** Hotel agents of site users on the Goldfish server: requests the site forwarded. */
   readonly hotelCalls: Array<{ method: string; path: string; body: unknown }> = [];
   hotel = {
@@ -326,6 +328,7 @@ export class Fakes {
 
   private goldfish(method: string, url: URL, headers: Headers, rawBody: unknown): Response {
     if (this.goldfishDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
+    if (this.goldfishRestarting) return json({ error: 'bad_gateway' }, 502);
     const path = url.pathname;
     if (path === '/extension/download') {
       if (!this.extensionZip) return json({ error: 'not_found' }, 404);
@@ -502,9 +505,10 @@ export interface TestApp {
 export async function startApp(
   env: Record<string, string> = {},
   store: Store = new MemoryStore(),
+  log: Logger = pino({ level: 'silent' }),
 ): Promise<TestApp> {
   const fakes = new Fakes();
-  const services = await createServices(testConfig(env), pino({ level: 'silent' }), {
+  const services = await createServices(testConfig(env), log, {
     store,
     fetch: fakes.fetch,
     retryDelaysMs: [0, 0],

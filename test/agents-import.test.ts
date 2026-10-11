@@ -1,3 +1,4 @@
+import { pino } from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   COMPETITORS_READY,
@@ -108,6 +109,30 @@ describe('agents page: folded team and the reference from a card', () => {
       headers: { origin: 'https://evil.test' },
     });
     expect(foreign.statusCode).toBe(403);
+  });
+});
+
+describe('agents page: the card is read while the Goldfish server restarts', () => {
+  it('a poll that meets the restart is logged as info, out of the error journal', async () => {
+    const lines: Array<{ level: number; msg: string }> = [];
+    const log = pino({ level: 'info' }, { write: (line: string) => lines.push(JSON.parse(line)) });
+    t = await startApp({}, undefined, log);
+    const cookies = await signIn(t);
+    t.fakes.goldfishRestarting = true;
+    const poll = await t.app.inject({ url: '/api/agents/profile/import/imp_1', cookies });
+    expect(poll.statusCode).toBe(502);
+    const restart = lines.filter((l) => l.msg.startsWith('agents import:'));
+    expect(restart.map((l) => [l.level, l.msg])).toEqual([
+      [30, 'agents import: goldfish restarting, the page asks again'],
+    ]);
+
+    // A server that cannot be reached at all stays an error.
+    t.fakes.goldfishRestarting = false;
+    t.fakes.goldfishDown = true;
+    await t.app.inject({ url: '/api/agents/profile/import/imp_1', cookies });
+    expect(lines.filter((l) => l.level >= 50).map((l) => l.msg)).toEqual([
+      'agents import: goldfish unavailable',
+    ]);
   });
 });
 
