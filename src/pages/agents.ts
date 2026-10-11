@@ -108,6 +108,8 @@ export interface ListingSearchView {
     verdict: 'mine' | 'not_mine' | null;
     error: string | null;
     publishProposed: boolean;
+    /** Found by a search before: read again by its address, not searched for. */
+    recheck?: boolean;
   }>;
 }
 
@@ -411,9 +413,10 @@ function listingsBlock(l: ListingSearchView | null | undefined): string {
   <button class="btn btn--accent btn--sm" type="button" data-act="listings-start">Найти объявления</button>`;
   if (l.status === 'searching') {
     const done = l.platforms.filter((x) => x.status !== 'searching').length;
+    const rechecked = l.platforms.filter((x) => x.recheck).length;
     return `<div class="import import--wait" data-poll-url="/api/agents/listings" role="status">
   <span class="spinner" aria-hidden="true"></span>
-  <div><b>Агент ищет объявление: готово ${done} из ${l.platforms.length} площадок…</b><p class="hint">Площадки читаются параллельно. Страница обновится сама.</p></div>
+  <div><b>Агент ищет объявление: готово ${done} из ${l.platforms.length} площадок…</b><p class="hint">${rechecked ? `Найденные раньше (${rechecked}) перечитывает по ссылке, на остальных ищет. ` : ''}Площадки читаются параллельно. Страница обновится сама.</p></div>
 </div>`;
   }
   const row = (x: ListingSearchView['platforms'][number]) => {
@@ -446,9 +449,9 @@ ${l.platforms.map(row).join('\n')}
   </table></div>
   <div class="row">
     ${mine ? '<button class="btn btn--accent btn--sm" type="button" data-act="listings-sync" data-title="Сверить карточки с эталоном">Сверить карточки с эталоном</button>' : ''}
-    <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">Искать заново</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">Обновить поиск</button>
   </div>
-  <p class="hint">«Сверить» — агент сравнит описание, удобства и правила на площадках с эталоном и предложит правки. «Разместить» — заполнит анкету объекта по эталону; вход, документы и отправку делаете вы.</p>`;
+  <p class="hint">«Обновить поиск» — найденные объявления агент перечитает по ссылке, отмеченные «Не моё» пропустит, искать будет только там, где объявления не было. «Сверить» — агент сравнит описание, удобства и правила на площадках с эталоном и предложит правки. «Разместить» — заполнит анкету объекта по эталону; вход, документы и отправку делаете вы.</p>`;
 }
 
 const VERDICTS: Array<['direct' | 'not' | 'unsure', string]> = [
