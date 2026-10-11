@@ -7,6 +7,7 @@ import Fastify, {
 import { accessOf, goldfishUserId } from './access.js';
 import { isSecure } from './config.js';
 import { openExtension } from './extension.js';
+import { GoldfishError } from './goldfish/admin.js';
 import { renderHelp } from './pages/help.js';
 import { renderNotFound, renderPage, type Notice } from './pages/page.js';
 import {
@@ -304,7 +305,14 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       const res = await s.goldfish.hotel(goldfishUserId(user), 'GET', `/profile/import/${id(req)}`);
       return reply.code(res.status).send(res.body);
     } catch (err) {
-      req.log.error({ err }, 'agents import: goldfish unavailable');
+      // The page asks again in 5 s: a restart of the Goldfish server that outlasts the retries
+      // of a read (502 for some 20 s at 11:59) is a missed tick, not an error for the journal.
+      if (err instanceof GoldfishError && err.status && err.status >= 502 && err.status <= 504)
+        req.log.info(
+          { status: err.status },
+          'agents import: goldfish restarting, the page asks again',
+        );
+      else req.log.error({ err }, 'agents import: goldfish unavailable');
       return reply.code(502).send({ error: 'goldfish_unavailable' });
     }
   });
