@@ -21,14 +21,14 @@ export interface Services {
 export async function createServices(
   config: Config,
   log: Logger,
-  overrides: { store?: Store; fetch?: typeof fetch } = {},
+  overrides: { store?: Store; fetch?: typeof fetch; retryDelaysMs?: readonly number[] } = {},
 ): Promise<Services> {
   const store =
     overrides.store ??
     (config.DATABASE_URL ? await PostgresStore.connect(config.DATABASE_URL) : new MemoryStore());
   if (!overrides.store && !config.DATABASE_URL)
     log.warn('DATABASE_URL is not set: users and sessions are kept in memory');
-  const goldfish = new GoldfishAdmin(config, overrides.fetch);
+  const goldfish = new GoldfishAdmin(config, overrides.fetch, overrides.retryDelaysMs);
   return {
     config,
     log,

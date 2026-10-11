@@ -507,6 +507,7 @@ export async function startApp(
   const services = await createServices(testConfig(env), pino({ level: 'silent' }), {
     store,
     fetch: fakes.fetch,
+    retryDelaysMs: [0, 0],
   });
   const app = await buildApp(services);
   await app.ready();

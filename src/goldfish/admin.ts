@@ -12,6 +12,12 @@ export class GoldfishError extends Error {
 }
 
 const TIMEOUT_MS = 15_000;
+/**
+ * Pauses before a read is asked again: a restart of the Goldfish server answers 502 for a few
+ * seconds (its deploy at 06:09 gave the agents page «goldfish unavailable»).
+ */
+const RETRY_DELAYS_MS = [1_000, 3_000];
+const RESTARTING = new Set([502, 503, 504]);
 
 /**
  * Client of the Goldfish server's admin API (docs/protocol.md in the goldfish repository).
@@ -26,21 +32,32 @@ export class GoldfishAdmin {
       'GOLDFISH_ADMIN_URL' | 'GOLDFISH_ADMIN_TOKEN' | 'GOLDFISH_CLIENT_ID' | 'GOLDFISH_CLIENT_NAME'
     >,
     private readonly fetchFn: typeof fetch = fetch,
+    private readonly retryDelaysMs: readonly number[] = RETRY_DELAYS_MS,
   ) {}
 
+  /** A read is asked again while the server restarts; a change is sent once. */
   private async call(method: string, path: string, body?: unknown): Promise<Response> {
-    try {
-      return await this.fetchFn(new URL(path, this.config.GOLDFISH_ADMIN_URL), {
-        method,
-        headers: {
-          authorization: `Bearer ${this.config.GOLDFISH_ADMIN_TOKEN}`,
-          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-    } catch (err) {
-      throw new GoldfishError(`${method} ${path}: ${(err as Error).message}`);
+    const delays = method === 'GET' ? this.retryDelaysMs : [];
+    for (let attempt = 0; ; attempt++) {
+      const last = attempt >= delays.length;
+      try {
+        const res = await this.fetchFn(new URL(path, this.config.GOLDFISH_ADMIN_URL), {
+          method,
+          headers: {
+            authorization: `Bearer ${this.config.GOLDFISH_ADMIN_TOKEN}`,
+            ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        if (last || !RESTARTING.has(res.status)) return res;
+        await res.body?.cancel().catch(() => undefined);
+      } catch (err) {
+        // A server that does not answer in time is not restarting: no second wait.
+        if (last || (err as Error).name === 'TimeoutError')
+          throw new GoldfishError(`${method} ${path}: ${(err as Error).message}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
     }
   }
 
