@@ -120,11 +120,17 @@ describe('agents page: listings on the platforms and competitors', () => {
     expect(html).toContain('data-act="competitors-start"');
     expect(html).toContain('Поиск начнётся только по кнопке');
 
-    t.fakes.listings = { ...LISTINGS_READY, status: 'searching' };
+    t.fakes.listings = {
+      ...LISTINGS_READY,
+      status: 'searching',
+      platforms: LISTINGS_READY.platforms.map((x, i) => ({ ...x, recheck: i === 0 })),
+    };
     t.fakes.competitorSearch = { ...COMPETITORS_READY, status: 'searching' };
     html = (await t.app.inject({ url: '/agents', cookies })).body;
     expect(html).toContain('data-poll-url="/api/agents/listings"');
     expect(html).toContain('data-poll-url="/api/agents/competitors"');
+    // A search again: what was found is read again by its link.
+    expect(html).toContain('Найденные раньше (1) перечитывает по ссылке, на остальных ищет.');
 
     t.fakes.listings = LISTINGS_READY;
     t.fakes.competitorSearch = COMPETITORS_READY;
