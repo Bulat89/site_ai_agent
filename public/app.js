@@ -693,6 +693,43 @@ document.querySelectorAll('[data-act="listing-verdict"]').forEach((button) =>
   ),
 );
 
+// «Внести вручную»: the owner's own address of the listing; the platform is registered at once.
+const listingManual = document.querySelector('form[data-form="listing-manual"]');
+if (listingManual)
+  listingManual.addEventListener(
+    'submit',
+    guarded(async (event) => {
+      event.preventDefault();
+      const button = listingManual.querySelector('button[type="submit"]');
+      button.disabled = true;
+      const select = listingManual.elements.platform;
+      const title = select.options[select.selectedIndex]?.text ?? select.value;
+      try {
+        await agentsCall('POST', '/api/agents/listings/manual', {
+          platform: select.value,
+          url: listingManual.elements.url.value.trim(),
+        });
+      } finally {
+        button.disabled = false;
+      }
+      reloadWith(
+        `${title}: объявление подключено в «Системы и площадки» — агент будет читать его по ссылке, без поиска.`,
+      );
+    }),
+  );
+
+// «Внести ссылку» in a row: opens the form with that platform chosen.
+document.querySelectorAll('[data-act="listing-manual-pick"]').forEach((button) =>
+  button.addEventListener('click', () => {
+    const box = document.querySelector('[data-listing-manual]');
+    if (!box || !listingManual) return;
+    box.open = true;
+    listingManual.elements.platform.value = button.getAttribute('data-platform');
+    listingManual.elements.url.focus();
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }),
+);
+
 document.querySelectorAll('[data-act="listing-publish"]').forEach((button) =>
   button.addEventListener(
     'click',

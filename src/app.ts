@@ -379,6 +379,10 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     proxy('POST', () => '/listings/sync'),
   );
   app.post(
+    '/api/agents/listings/manual',
+    proxy('POST', () => '/listings/manual'),
+  );
+  app.post(
     '/api/agents/listings/:id/:platform',
     proxy('POST', (req) => `/listings/${id(req)}/${platform(req)}`),
   );

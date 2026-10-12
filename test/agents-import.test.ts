@@ -194,7 +194,7 @@ describe('agents page: listings on the platforms and competitors', () => {
     );
     expect(html).toContain('не прочитано: капча');
     // A search again: what was found is read again by its link.
-    expect(html).toContain('перечитывает по ссылке…');
+    expect(html).toContain('читает по ссылке…');
     expect(html).toContain('ищет…');
     expect(html).not.toContain('data-act="listings-start"');
     // Candidates found so far are shown; the owner answers once every platform is read.
@@ -221,6 +221,71 @@ describe('agents page: listings on the platforms and competitors', () => {
     expect(html).not.toContain('javascript:alert');
     expect(html).toContain('Гранд &#60;Отель&#62;');
     expect(html).toContain('data-verdict="not" aria-pressed="true"');
+  });
+
+  it('the owner enters a listing’s address by hand, with or without a search before', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    // No search yet: the form is there next to «Найти объявления», with the guest platforms.
+    let html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('data-form="listing-manual"');
+    expect(html).toContain('<option value="ostrovok">Островок</option>');
+    expect(html).toContain('<option value="avito">Авито</option>');
+    expect(html).not.toContain('<option value="bnovo"');
+
+    // A record made by an address entered by hand: the rest is «не искали», with a link to enter.
+    const [ostrovok, yandex, avito, hotels101] = LISTINGS_READY.platforms;
+    t.fakes.listings = {
+      ...LISTINGS_READY,
+      platforms: [
+        { ...ostrovok, status: 'not_searched', url: null, listingTitle: null, verdict: null },
+        { ...yandex, status: 'found', verdict: 'mine', manual: true, why: 'внесено вручную' },
+        { ...avito, status: 'not_found' },
+        { ...hotels101, status: 'found', verdict: 'mine', error: 'не удалось перечитать: капча' },
+      ],
+    };
+    html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('не искали');
+    expect(html).toContain('data-act="listing-manual-pick" data-platform="ostrovok"');
+    expect(html).toContain('data-act="listing-manual-pick" data-platform="avito"');
+    expect(html).toContain('внесено вручную');
+    expect(html).toContain('не удалось перечитать: капча');
+    expect(html).toContain('ваши объявления (подключённые и внесённые вручную)');
+
+    const added = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/listings/manual',
+      cookies,
+      headers: origin,
+      payload: { platform: 'avito', url: 'https://www.avito.ru/sochi/doma/dom_123' },
+    });
+    expect(added.statusCode).toBe(200);
+    expect(
+      added.json().platforms.find((x: { platform: string }) => x.platform === 'avito'),
+    ).toMatchObject({
+      verdict: 'mine',
+      manual: true,
+    });
+    // The server's refusal reaches the owner as is; a change needs this site's origin.
+    const wrong = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/listings/manual',
+      cookies,
+      headers: origin,
+      payload: { platform: 'avito', url: 'https://ostrovok.ru/hotel/x' },
+    });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().message).toBe('это ссылка не на Авито');
+    expect(
+      (
+        await t.app.inject({
+          method: 'POST',
+          url: '/api/agents/listings/manual',
+          cookies,
+          payload: { platform: 'avito', url: 'https://www.avito.ru/x' },
+        })
+      ).statusCode,
+    ).toBe(403);
   });
 
   it('forwards the owner’s answers and polls only with the session', async () => {

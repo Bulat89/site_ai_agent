@@ -97,7 +97,8 @@ export interface ListingSearchView {
   platforms: Array<{
     platform: string;
     title: string;
-    status: 'searching' | 'found' | 'not_found' | 'failed';
+    /** not_searched — no search was run there (only an address entered by hand is known). */
+    status: 'searching' | 'found' | 'not_found' | 'failed' | 'not_searched';
     url: string | null;
     listingTitle: string | null;
     address: string | null;
@@ -110,6 +111,10 @@ export interface ListingSearchView {
     publishProposed: boolean;
     /** Found by a search before: read again by its address, not searched for. */
     recheck?: boolean;
+    /** Read by its known address (the owner's listing or one found before), not searched for. */
+    byLink?: boolean;
+    /** The owner entered the address by hand. */
+    manual?: boolean;
   }>;
 }
 
@@ -425,41 +430,85 @@ function pollState(platforms: Array<{ status: string; found?: number }>): string
   return JSON.stringify(platforms.map((x) => [x.status, x.found ?? null]));
 }
 
+/** A guest platform the owner can enter a listing's address for. */
+export interface GuestPlatform {
+  id: string;
+  title: string;
+}
+
 /**
- * «Объявления на площадках»: where the property is listed. The owner marks their listings (the
- * platform is registered in «Системы и площадки»), then checks the cards against the reference and
- * asks to put the listing where there is none (each by approval).
+ * «Внести вручную»: the owner pastes the address of their listing on a platform — it is registered
+ * in «Системы и площадки» at once, without a search, and the agent then reads it by the address.
  */
-function listingsBlock(l: ListingSearchView | null | undefined): string {
+function manualListingForm(platforms: GuestPlatform[]): string {
+  if (!platforms.length) return '';
+  return `<details class="listing-manual" data-listing-manual>
+  <summary>Внести объявление вручную</summary>
+  <p class="hint">Знаете, где ваше объявление? Вставьте ссылку — площадка сразу подключится в «Системы и площадки», а агент будет читать объявление по ссылке, без поиска.</p>
+  <form class="field__row" data-form="listing-manual">
+    <select name="platform" required aria-label="Площадка">${platforms
+      .map((p) => `<option value="${esc(p.id)}">${esc(p.title)}</option>`)
+      .join('')}</select>
+    <input name="url" type="url" required placeholder="https://…" aria-label="Ссылка на ваше объявление">
+    <button class="btn btn--accent btn--sm" type="submit">Добавить</button>
+  </form>
+</details>`;
+}
+
+/**
+ * «Объявления на площадках»: where the property is listed. The owner marks their listings or
+ * enters an address by hand (the platform is registered in «Системы и площадки»), then checks the
+ * cards against the reference and asks to put the listing where there is none (each by approval).
+ * A listing whose address is known is read by it: the agent searches only where none is known.
+ */
+function listingsBlock(
+  l: ListingSearchView | null | undefined,
+  platforms: GuestPlatform[],
+): string {
   if (!l)
-    return `<p class="hint">Агент поищет ваше объявление на всех площадках для гостей по названию и адресу из эталона. Вы отметите свои — они подключатся в «Системы и площадки».</p>
-  <button class="btn btn--accent btn--sm" type="button" data-act="listings-start">Найти объявления</button>`;
+    return `<p class="hint">Агент поищет ваше объявление на всех площадках для гостей по названию и адресу из эталона. Вы отметите свои — они подключатся в «Системы и площадки». Знаете ссылку — внесите её сами, искать не придётся.</p>
+  <button class="btn btn--accent btn--sm" type="button" data-act="listings-start">Найти объявления</button>
+  ${manualListingForm(platforms)}`;
   const searching = l.status === 'searching';
+  const enter = (x: ListingSearchView['platforms'][number], label: string) =>
+    `<button class="btn btn--ghost btn--sm" type="button" data-act="listing-manual-pick" data-platform="${esc(x.platform)}">${label}</button>`;
   const row = (x: ListingSearchView['platforms'][number]) => {
     const url = safeUrl(x.url);
     let what = '<span class="muted">—</span>';
     let act = '';
     if (x.status === 'found') {
-      what = `${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.listingTitle ?? url)}</a>` : esc(x.listingTitle ?? '')}${x.address ? `<br><span class="muted">${esc(x.address)}</span>` : ''}${x.matchTitle ? `<br><span class="hint">${esc(x.matchTitle)}: ${esc(x.why ?? '')}</span>` : ''}`;
+      const note =
+        x.verdict === 'mine'
+          ? x.manual
+            ? 'внесено вручную'
+            : x.why
+          : x.matchTitle
+            ? `${x.matchTitle}: ${x.why ?? ''}`
+            : null;
+      what = `${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.listingTitle ?? url)}</a>` : esc(x.listingTitle ?? '')}${x.address ? `<br><span class="muted">${esc(x.address)}</span>` : ''}${x.rating && x.verdict === 'mine' ? `<br><span class="muted">рейтинг ${esc(x.rating)}</span>` : ''}${note ? `<br><span class="hint">${esc(note)}</span>` : ''}${x.error ? `<br><span class="muted">${esc(x.error)}</span>` : ''}`;
       act =
         x.verdict === 'mine'
           ? '<span class="ok-text">✓ подключена</span>'
           : x.verdict === 'not_mine'
-            ? '<span class="muted">не ваше</span>'
+            ? `<span class="muted">не ваше</span> ${enter(x, 'Моё по ссылке')}`
             : `<span class="row row--tight"><button class="btn btn--accent btn--sm" type="button" data-act="listing-verdict" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-mine="1">Моё</button><button class="btn btn--ghost btn--sm" type="button" data-act="listing-verdict" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-mine="0">Не моё</button></span>`;
     } else if (x.status === 'not_found') {
       what = '<span class="muted">объявления нет</span>';
       act = x.publishProposed
         ? '<span class="muted">размещение на согласовании</span>'
-        : `<button class="btn btn--ghost btn--sm" type="button" data-act="listing-publish" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-title="${esc(x.title)}">Разместить</button>`;
-    } else if (x.status === 'failed')
+        : `<span class="row row--tight"><button class="btn btn--ghost btn--sm" type="button" data-act="listing-publish" data-id="${esc(l.id)}" data-platform="${esc(x.platform)}" data-title="${esc(x.title)}">Разместить</button>${enter(x, 'Есть — внести ссылку')}</span>`;
+    } else if (x.status === 'failed') {
       what = `<span class="muted">не прочитано: ${esc(x.error ?? '')}</span>`;
-    else if (x.status === 'searching')
-      what = `<span class="muted">${x.recheck ? 'перечитывает по ссылке…' : 'ищет…'}</span>`;
+      act = enter(x, 'Внести ссылку');
+    } else if (x.status === 'not_searched') {
+      what = '<span class="muted">не искали</span>';
+      act = enter(x, 'Внести ссылку');
+    } else if (x.status === 'searching')
+      what = `<span class="muted">${x.byLink || x.recheck ? 'читает по ссылке…' : 'ищет…'}</span>`;
     return `      <tr><td>${esc(x.title)}</td><td>${what}</td><td>${act}</td></tr>`;
   };
   const table = `<div class="table-scroll"><table class="duties">
-    <thead><tr><th>Площадка</th><th>Что нашёл агент</th><th><span class="visually-hidden">Действие</span></th></tr></thead>
+    <thead><tr><th>Площадка</th><th>Объявление</th><th><span class="visually-hidden">Действие</span></th></tr></thead>
     <tbody>
 ${l.platforms.map(row).join('\n')}
     </tbody>
@@ -473,12 +522,14 @@ ${l.platforms.map(row).join('\n')}
 ${table}`;
   }
   const mine = l.platforms.some((x) => x.verdict === 'mine');
+  const searched = l.platforms.some((x) => x.status !== 'not_searched');
   return `${table}
   <div class="row">
     ${mine ? '<button class="btn btn--accent btn--sm" type="button" data-act="listings-sync" data-title="Сверить карточки с эталоном">Сверить карточки с эталоном</button>' : ''}
-    <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">Обновить поиск</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-act="listings-start">${searched ? 'Обновить поиск' : 'Найти объявления'}</button>
   </div>
-  <p class="hint">«Обновить поиск» — найденные объявления агент перечитает по ссылке, отмеченные «Не моё» пропустит, искать будет только там, где объявления не было. «Сверить» — агент сравнит описание, удобства и правила на площадках с эталоном и предложит правки. «Разместить» — заполнит анкету объекта по эталону; вход, документы и отправку делаете вы.</p>`;
+  ${manualListingForm(platforms)}
+  <p class="hint">${searched ? '«Обновить поиск»' : '«Найти объявления»'} — ваши объявления (подключённые и внесённые вручную) и найденные раньше агент прочитает по ссылке, без поиска; отмеченные «Не моё» пропустит; искать будет только там, где ссылки нет. «Сверить» — агент сравнит описание, удобства и правила на площадках с эталоном и предложит правки. «Разместить» — заполнит анкету объекта по эталону; вход, документы и отправку делаете вы.</p>`;
 }
 
 const VERDICTS: Array<['direct' | 'not' | 'unsure', string]> = [
@@ -774,7 +825,12 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
   <section class="cabinet" aria-label="После эталона">
     <article class="card">
       <div class="card__head"><h2 id="listings-title">Объявления на площадках</h2></div>
-      ${listingsBlock(s.listings)}
+      ${listingsBlock(
+        s.listings,
+        h.settings.platforms
+          .filter((p) => p.category === 'guest')
+          .map((p) => ({ id: p.id, title: p.title })),
+      )}
     </article>
     <article class="card">
       <div class="card__head"><h2 id="competitors-title">Конкуренты</h2><span class="row row--tight"><a href="/agents/prices">Цены</a>${helpLink('competitors-auto', 'Как агент решает?')}</span></div>
