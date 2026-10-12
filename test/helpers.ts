@@ -524,6 +524,18 @@ export class Fakes {
         return json({ ...LISTINGS_READY, status: 'searching' }, 201);
       if (method === 'POST' && sub === '/listings/lst_1/ostrovok')
         return json({ ...LISTINGS_READY, mine: body.mine });
+      if (method === 'POST' && sub === '/listings/manual') {
+        if (typeof body.url !== 'string' || !body.url.startsWith('https://www.avito.ru/'))
+          return json({ error: 'bad_request', message: 'это ссылка не на Авито' }, 400);
+        return json({
+          ...LISTINGS_READY,
+          platforms: LISTINGS_READY.platforms.map((x) =>
+            x.platform === body.platform
+              ? { ...x, status: 'found', url: body.url, verdict: 'mine', manual: true }
+              : x,
+          ),
+        });
+      }
       if (method === 'POST' && sub === '/competitors/candidates/cmp_1')
         return json({
           verdict: body.verdict,

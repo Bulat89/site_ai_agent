@@ -1594,3 +1594,19 @@ h1 {
 .proofs q {
   quotes: '«' '»';
 }
+
+.listing-manual {
+  margin: 12px 0;
+  font-size: 14px;
+}
+.listing-manual .hint {
+  margin: 6px 0 10px;
+}
+.listing-manual .field__row input {
+  flex: 1;
+  min-width: 0;
+}
+.listing-manual select {
+  flex: 0 1 35%;
+  min-width: 0;
+}
