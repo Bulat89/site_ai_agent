@@ -133,9 +133,24 @@ export interface CompetitorSearchView {
     platform: string;
     score: number;
     reasons: string[];
+    /** The owner's answer, else the agent's decision. */
     verdict: 'direct' | 'not' | 'unsure' | null;
     verdictTitle: string | null;
+    /** Older Goldfish servers do not send what follows: there the owner decides alone. */
+    by?: 'owner' | 'agent' | null;
+    agent?: {
+      verdict: 'direct' | 'not';
+      reason: string;
+      method: 'model' | 'rule' | 'owner';
+    } | null;
+    ownerReason?: string | null;
+    description?: string | null;
+    priceFrom?: number | null;
   }>;
+  /** Direct competitors in this search. */
+  direct?: number;
+  /** Their prices («от»): the average and the median. */
+  prices?: { n: number; mean: number; median: number; min: number; max: number } | null;
   competitors: Array<{ name: string; url: string }>;
 }
 
@@ -472,24 +487,41 @@ const VERDICTS: Array<['direct' | 'not' | 'unsure', string]> = [
   ['unsure', 'Не уверен'],
 ];
 
+/** Who decided about a candidate and why: the owner's answer, or the agent by itself. */
+function decision(x: CompetitorSearchView['candidates'][number]): string {
+  if (x.by === 'owner')
+    return `<span class="by by--owner">вы: ${esc(x.verdictTitle ?? '')}</span>${x.ownerReason ? ` ${esc(x.ownerReason)}` : ''}${x.agent && x.agent.verdict !== x.verdict ? ` <span class="muted">(агент считал: ${x.agent.verdict === 'direct' ? 'прямой' : 'не конкурент'})</span>` : ''}`;
+  if (x.by === 'agent' && x.agent)
+    return `<span class="by by--${x.agent.verdict === 'direct' ? 'agent' : 'not'}">${x.agent.method === 'owner' ? 'как вы ответили раньше' : 'агент'}: ${x.agent.verdict === 'direct' ? 'прямой конкурент' : 'не конкурент'}</span> ${esc(x.agent.reason)}`;
+  return '';
+}
+
 /**
- * «Конкуренты»: the search starts only by the owner's button (that is the consent). The owner
- * answers about each candidate; direct ones join «Конкуренты», every answer trains the search.
+ * «Конкуренты»: the search starts by the owner's button (that is the consent). When every
+ * platform is read, the agent decides about each candidate itself: direct ones join «Конкуренты»
+ * and their prices go to «Цены». The owner corrects any decision; the answers train the search.
  */
 function competitorsBlock(c: CompetitorSearchView | null | undefined, listed: number): string {
   const start = (label: string) =>
     `<button class="btn btn--${label === 'Найти конкурентов' ? 'accent' : 'ghost'} btn--sm" type="button" data-act="competitors-start">${label}</button>`;
   if (!c)
-    return `<p class="hint">Агент найдёт объекты рядом, похожие по месту, типу, номерам, удобствам и цене, и покажет, чем они похожи. Вы ответите про каждый: прямой конкурент или нет — прямых будет отслеживать агент цен. Ваши ответы сохраняются и учат поиск. Поиск начнётся только по кнопке.</p>
+    return `<p class="hint">Агент найдёт объекты рядом и сам решит, кто ваш прямой конкурент: сравнит тип, описание, номера, удобства, место и цену. Прямых он добавит в «Конкуренты», посчитает их среднюю и медианную цену и порекомендует вашу. Любое его решение можно поправить — ответ он запомнит. Поиск начнётся только по кнопке.</p>
   ${start('Найти конкурентов')}`;
-  // While the search runs, what is found so far is shown without answers: the owner is asked
+  // While the search runs, what is found so far is shown without decisions: the agent decides
   // about the best of all platforms once every platform is read.
   const searching = c.status === 'searching';
+  const decided = c.candidates.some((x) => x.by !== undefined);
   const item = (x: CompetitorSearchView['candidates'][number]) => {
     const url = safeUrl(x.url);
-    return `    <li class="competitor" data-candidate="${esc(x.id)}">
-      <div><b>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)}</b> <span class="muted">${esc(x.platform)}</span></div>
-      <div class="hint">${esc(x.reasons.join(', '))}</div>
+    const why = searching ? '' : decision(x);
+    return `    <li class="competitor${x.verdict === 'direct' ? ' competitor--direct' : ''}" data-candidate="${esc(x.id)}">
+      <div><b>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)}</b> <span class="muted">${esc(x.platform)}${x.priceFrom ? ` · от ${esc(rub(x.priceFrom))}` : ''}</span></div>
+${
+  why
+    ? `      <div class="competitor__why">${why}</div>
+`
+    : ''
+}      <div class="hint">${esc(x.reasons.join(', '))}${x.description ? ` — ${esc(x.description)}` : ''}</div>
 ${searching ? '' : `      <div class="row row--tight verdicts">${VERDICTS.map(([v, label]) => `<button class="btn btn--ghost btn--sm" type="button" data-act="competitor-verdict" data-id="${esc(x.id)}" data-verdict="${v}" aria-pressed="${x.verdict === v}">${label}</button>`).join('')}</div>\n`}    </li>`;
   };
   if (searching) {
@@ -501,13 +533,27 @@ ${searching ? '' : `      <div class="row row--tight verdicts">${VERDICTS.map(([
       .join('; ');
     return `<div class="import import--wait" data-poll-url="/api/agents/competitors" data-poll-state="${esc(pollState(c.platforms))}" role="status">
   <span class="spinner" aria-hidden="true"></span>
-  <div><b>Агент ищет конкурентов: ${where}</b><p class="hint">Найденное показываю сразу; ответить про каждый можно будет, когда прочитаны все площадки. Страница обновится сама.</p></div>
+  <div><b>Агент ищет конкурентов: ${where}</b><p class="hint">Найденное показываю сразу; кто из них прямой конкурент, агент решит, когда прочитаны все площадки. Страница обновится сама.</p></div>
 </div>
 ${c.candidates.length ? `<p class="hint">Пока найдено ${c.found}, самые похожие:</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : ''}`;
   }
-  return `${c.candidates.length ? `<p class="hint">Нашёл ${c.found}, вот самые похожие. Отметьте прямых конкурентов.</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : '<p class="hint">Похожих объектов рядом не нашлось.</p>'}
+  if (!c.candidates.length)
+    return `<p class="hint">Похожих объектов рядом не нашлось.</p>
   <p class="hint" data-competitors-count>В «Конкурентах» сейчас: ${listed}.</p>
   ${start('Искать заново')}`;
+  const summary = decided
+    ? `<p class="hint">Нашёл ${c.found}, агент отобрал прямых конкурентов: ${c.direct ?? c.candidates.filter((x) => x.verdict === 'direct').length}. Не согласны — нажмите свой ответ, агент его запомнит.</p>
+  ${c.prices ? `<p class="competitors__prices">Их цены «от»: средняя <b>${esc(rub(c.prices.mean))}</b>, медиана <b>${esc(rub(c.prices.median))}</b> <span class="muted">(${c.prices.n}, от ${esc(rub(c.prices.min))} до ${esc(rub(c.prices.max))})</span></p>` : ''}`
+    : `<p class="hint">Нашёл ${c.found}, вот самые похожие. Отметьте прямых конкурентов.</p>`;
+  return `${summary}
+  <ol class="competitors">
+${c.candidates.map(item).join('\n')}
+  </ol>
+  <p class="hint" data-competitors-count>В «Конкурентах» сейчас: ${listed}.</p>
+  <div class="row">
+    <a class="btn btn--accent btn--sm" href="/agents/prices">Цены и рекомендация</a>
+    ${start('Искать заново')}
+  </div>`;
 }
 
 /**
@@ -731,7 +777,7 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
       ${listingsBlock(s.listings)}
     </article>
     <article class="card">
-      <div class="card__head"><h2 id="competitors-title">Конкуренты</h2></div>
+      <div class="card__head"><h2 id="competitors-title">Конкуренты</h2><span class="row row--tight"><a href="/agents/prices">Цены</a>${helpLink('competitors-auto', 'Как агент решает?')}</span></div>
       ${competitorsBlock(s.competitorSearch, ((h.profile.competitors as unknown[] | undefined) ?? []).length)}
     </article>
   </section>

@@ -10,6 +10,7 @@ import { openExtension } from './extension.js';
 import { GoldfishError } from './goldfish/admin.js';
 import { renderHelp } from './pages/help.js';
 import { renderNotFound, renderPage, type Notice } from './pages/page.js';
+import { renderPrices, type PriceBoardView } from './pages/prices.js';
 import {
   renderAgents,
   type ApprovalView,
@@ -236,6 +237,48 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       .send(renderAgents(state));
   });
 
+  // «Цены»: the direct competitors' prices with proofs and the recommendation.
+  app.get('/agents/prices', async (req, reply) => {
+    const user = await sessions.user(req);
+    if (!user) return reply.redirect('/auth/yandex');
+    if (!accessOf(user).allowed) return reply.redirect('/');
+    const gf = goldfishUserId(user);
+    let state: Parameters<typeof renderPrices>[0] = {
+      ...view,
+      user,
+      hotelName: null,
+      board: null,
+      error: null,
+    };
+    try {
+      const [hotel, board] = await Promise.all([
+        s.goldfish.hotel<HotelView>(gf, 'GET', ''),
+        s.goldfish.hotel<PriceBoardView>(gf, 'GET', '/prices'),
+      ]);
+      // An older Goldfish has no «Цены» yet: say so rather than «unavailable».
+      if (board.status === 404) {
+        state.error = 'Сервер агентов ещё не умеет считать цены конкурентов — его нужно обновить.';
+        return reply
+          .type('text/html; charset=utf-8')
+          .header('cache-control', 'private, no-store')
+          .send(renderPrices(state));
+      }
+      if (board.status !== 200) throw new Error(`prices: ${board.status}`);
+      state = {
+        ...state,
+        hotelName: hotel.status === 200 ? String(hotel.body.profile.name ?? '') || null : null,
+        board: board.body,
+      };
+    } catch (err) {
+      req.log.error({ err }, 'prices page: goldfish unavailable');
+      state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+    }
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'private, no-store')
+      .send(renderPrices(state));
+  });
+
   /**
    * Changes from the agents page, proxied to Goldfish on the owner's behalf. Only from this site's
    * pages, only for a signed-in user with access; the server's refusals come back as they are.
@@ -350,6 +393,10 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
   app.post(
     '/api/agents/competitors/candidates/:id',
     proxy('POST', (req) => `/competitors/candidates/${id(req)}`),
+  );
+  app.post(
+    '/api/agents/prices/accept',
+    proxy('POST', () => '/prices/accept'),
   );
   // Polled by the page while a search runs (a read: the session is enough).
   for (const what of ['listings', 'competitors'] as const)
