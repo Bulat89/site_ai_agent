@@ -150,11 +150,107 @@ export const COMPETITORS_READY = {
   competitors: [],
 };
 
+/** GET …/hotel/prices: three direct competitors, weekly prices for two nights. */
+export const PRICE_BOARD = {
+  updatedAt: '2026-10-14T09:00:00.000Z',
+  basis: 'monitor',
+  own: {
+    priceFrom: 5000,
+    rooms: [
+      { id: 'std', name: 'Стандарт', basePrice: 5000 },
+      { id: 'lux', name: 'Люкс', basePrice: 9000 },
+    ],
+  },
+  competitors: [
+    {
+      name: 'Вилла Роза',
+      url: 'https://ostrovok.ru/hotel/villa-roza/',
+      platform: 'Островок',
+      by: 'agent',
+      reason: 'гостевой дом в 400 м, номера на 2–3 гостей',
+      kind: 'Гостевой дом',
+      rating: 4.8,
+      distanceKm: 0.4,
+      price: 5200,
+      prices: 3,
+    },
+    {
+      name: 'Дом <Чайки>',
+      url: 'javascript:alert(1)',
+      platform: 'Островок',
+      by: 'owner',
+      reason: null,
+      kind: null,
+      rating: null,
+      distanceKm: 1.2,
+      price: 5900,
+      prices: 2,
+    },
+    {
+      name: 'Сосны',
+      url: 'https://ostrovok.ru/hotel/sosny/',
+      platform: 'Островок',
+      by: 'manual',
+      reason: null,
+      kind: 'Мини-отель',
+      rating: null,
+      distanceKm: null,
+      price: 7400,
+      prices: 1,
+    },
+  ],
+  stats: { n: 3, mean: 6167, median: 5900, min: 5200, max: 7400, p25: 5550, p75: 6650 },
+  recommendation: {
+    price: 5900,
+    mean: 6167,
+    median: 5900,
+    own: 5000,
+    diffPercent: -15,
+    text: 'Цены прямых конкурентов: средняя 6 167 ₽, медиана 5 900 ₽. Ваша цена от 5 000 ₽ — на 15% ниже медианы. Рекомендую от 5 900 ₽.',
+    rooms: [
+      { id: 'std', name: 'Стандарт', current: 5000, recommended: 5900 },
+      { id: 'lux', name: 'Люкс', current: 9000, recommended: 10600 },
+    ],
+  },
+  note: null,
+  byDay: [
+    { day: '2026-10-17', n: 3, mean: 6467, median: 6400, min: 5600, max: 7400 },
+    { day: '2026-10-20', n: 2, mean: 5100, median: 5100, min: 4800, max: 5400 },
+  ],
+  history: [{ day: '2026-10-14', n: 5, mean: 5920, median: 5600 }],
+  proofs: [
+    {
+      competitor: 'Вилла Роза',
+      url: 'https://ostrovok.ru/hotel/villa-roza/',
+      day: '2026-10-17',
+      price: 5600,
+      quote: 'Стандарт · 5 600 ₽ за ночь <script>alert(1)</script>',
+      source: 'https://ostrovok.ru/hotel/villa-roza/?dates=17.10',
+      readAt: '2026-10-14T09:00:00.000Z',
+      taskId: 'task_1',
+      origin: 'monitor',
+    },
+    {
+      competitor: 'Дом <Чайки>',
+      url: null,
+      day: null,
+      price: 5900,
+      quote: null,
+      source: 'javascript:alert(2)',
+      readAt: '2026-10-13T09:00:00.000Z',
+      taskId: null,
+      origin: 'search',
+    },
+  ],
+  search: { id: 'cms_1', found: 6, direct: 3, createdAt: '2026-10-13T09:00:00.000Z' },
+};
+
 export class Fakes {
   /** GET …/hotel/profile/import: the latest draft, if any. */
   profileImport: unknown = null;
   listings: unknown = null;
   competitorSearch: unknown = null;
+  prices: unknown = PRICE_BOARD;
   // Yandex
   profile: YandexProfile = {
     id: '1000001',
@@ -417,6 +513,13 @@ export class Fakes {
       if (method === 'GET' && sub === '/profile/import') return json(this.profileImport);
       if (method === 'GET' && sub === '/listings') return json(this.listings);
       if (method === 'GET' && sub === '/competitors') return json(this.competitorSearch);
+      if (method === 'GET' && sub === '/prices')
+        return this.prices === null ? json({ error: 'not_found' }, 404) : json(this.prices);
+      if (method === 'POST' && sub === '/prices/accept') {
+        if (!Array.isArray(body.rooms) || !body.rooms.length)
+          return json({ error: 'bad_request', message: 'менять нечего' }, 400);
+        return json({ changed: ['«Стандарт»: 5 000 ₽ → 5 900 ₽'], board: this.prices });
+      }
       if (method === 'POST' && sub === '/listings')
         return json({ ...LISTINGS_READY, status: 'searching' }, 201);
       if (method === 'POST' && sub === '/listings/lst_1/ostrovok')

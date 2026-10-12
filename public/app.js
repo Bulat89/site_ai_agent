@@ -752,3 +752,94 @@ document.querySelectorAll('[data-act="competitor-verdict"]').forEach((button) =>
     }),
   ),
 );
+
+// «Цены»: the marks of the charts show their values on hover and focus. The values are in
+// data-tip as [title, [[value, label]…]] and go in as text, never as markup.
+const marks = document.querySelectorAll('[data-tip]');
+if (marks.length) {
+  const tipBox = document.createElement('div');
+  tipBox.className = 'viz-tip';
+  tipBox.setAttribute('aria-hidden', 'true');
+  tipBox.hidden = true;
+  document.body.appendChild(tipBox);
+  const place = (x, y) => {
+    const w = tipBox.offsetWidth;
+    const h = tipBox.offsetHeight;
+    tipBox.style.left = `${Math.max(8, Math.min(x + 14, innerWidth - w - 8))}px`;
+    tipBox.style.top = `${y + 14 + h > innerHeight - 8 ? Math.max(8, y - h - 14) : y + 14}px`;
+  };
+  const show = (el, x, y) => {
+    let data;
+    try {
+      data = JSON.parse(el.getAttribute('data-tip'));
+    } catch {
+      return;
+    }
+    const [title, rows] = data;
+    tipBox.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'viz-tip__title';
+    head.textContent = title;
+    tipBox.appendChild(head);
+    for (const [value, label] of rows) {
+      const row = document.createElement('div');
+      row.className = 'viz-tip__row';
+      const b = document.createElement('b');
+      b.textContent = value;
+      const span = document.createElement('span');
+      span.textContent = label;
+      row.append(b, span);
+      tipBox.appendChild(row);
+    }
+    tipBox.hidden = false;
+    place(x, y);
+  };
+  const hide = () => (tipBox.hidden = true);
+  marks.forEach((el) => {
+    el.addEventListener('pointerenter', (e) => show(el, e.clientX, e.clientY));
+    // A scroll hides the tip; the next move over the same mark brings it back.
+    el.addEventListener('pointermove', (e) =>
+      tipBox.hidden ? show(el, e.clientX, e.clientY) : place(e.clientX, e.clientY),
+    );
+    el.addEventListener('pointerleave', hide);
+    el.addEventListener('focus', () => {
+      const r = el.getBoundingClientRect();
+      show(el, r.left + r.width / 2, r.top + r.height / 2);
+    });
+    el.addEventListener('blur', hide);
+  });
+  addEventListener('scroll', hide, { passive: true });
+}
+
+// The proofs of one competitor at a time.
+const proofsFilter = document.querySelector('[data-proofs-filter]');
+if (proofsFilter)
+  proofsFilter.addEventListener('change', () => {
+    const name = proofsFilter.value;
+    document.querySelectorAll('[data-proof]').forEach((row) => {
+      row.hidden = !!name && row.getAttribute('data-proof') !== name;
+    });
+  });
+
+// «Принять»: the base prices of the chosen categories move to the recommendation.
+const acceptForm = document.querySelector('form[data-form="prices-accept"]');
+if (acceptForm)
+  acceptForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const button = acceptForm.querySelector('button[type="submit"]');
+    const rooms = [...acceptForm.querySelectorAll('input[name="room"]:checked')].map(
+      (i) => i.value,
+    );
+    if (!rooms.length) return showError('Отметьте категории, для которых принять цену.');
+    button.disabled = true;
+    agentsCall('POST', '/api/agents/prices/accept', { rooms })
+      .then((data) =>
+        reloadWith(
+          `Базовые цены в эталоне изменены: ${data.changed.join('; ')}. Правки для площадок придут одним согласованием.`,
+        ),
+      )
+      .catch((err) => {
+        showError(err.message);
+        button.disabled = false;
+      });
+  });

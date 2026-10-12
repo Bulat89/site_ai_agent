@@ -14,6 +14,12 @@
   --bad: #c92a2a;
   --shadow: 0 1px 2px rgb(27 29 34 / 4%), 0 12px 32px -12px rgb(27 29 34 / 18%);
   --radius: 14px;
+  /* Charts of «Цены»: validated as a set (light surface; the aqua needs labels or a table). */
+  --viz-median: #2a78d6;
+  --viz-mean: #1baf7a;
+  --viz-own: #e8590c;
+  --viz-bar: #bfc3cc;
+  --viz-bar-hover: #9aa0ac;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -32,6 +38,11 @@
     --warn: #f0a04b;
     --bad: #ff6b6b;
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 16px 40px -16px rgb(0 0 0 / 60%);
+    --viz-median: #3987e5;
+    --viz-mean: #199e70;
+    --viz-own: #d95926;
+    --viz-bar: #4a4f5a;
+    --viz-bar-hover: #636a77;
     color-scheme: dark;
   }
 }
@@ -1313,4 +1324,273 @@ h1 {
 }
 .ok-text {
   color: var(--ok);
+}
+
+/* ---------------------------------------------------------------- «Цены» */
+.competitor--direct {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+.competitor__why {
+  font-size: 14px;
+  margin-top: 2px;
+}
+.competitors__prices {
+  margin: 8px 0 0;
+}
+.by {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  white-space: nowrap;
+}
+.by--owner {
+  border-color: var(--accent);
+}
+.by--not {
+  color: var(--muted);
+}
+.money {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.prices .duties td:last-child {
+  width: auto;
+}
+.price-accept td:first-child {
+  width: 28px;
+}
+.price-accept input[type='checkbox'] {
+  width: 18px;
+  min-height: 0;
+  height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.price-hero {
+  display: grid;
+  gap: 8px 32px;
+  align-items: end;
+  margin-bottom: 20px;
+}
+@media (min-width: 720px) {
+  .price-hero {
+    grid-template-columns: auto 1fr;
+  }
+}
+.price-hero__value {
+  margin: 4px 0 0;
+  font-size: 52px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.price-hero__text {
+  margin: 0;
+  color: var(--muted);
+}
+.prices .tile b {
+  font-size: 19px;
+  font-variant-numeric: normal;
+}
+.prices .tile .hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+}
+.price-accept {
+  margin-top: 24px;
+}
+.price-accept h3,
+.viz__head h3 {
+  font-size: 17px;
+  margin: 0 0 4px;
+}
+.viz {
+  margin: 24px 0 0;
+}
+.viz__head .hint {
+  margin: 0;
+}
+.viz__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.viz__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.viz__key b {
+  color: var(--text);
+  font-weight: 600;
+}
+.hbars {
+  display: grid;
+  grid-template-columns: minmax(96px, 34%) minmax(0, 1fr);
+  gap: 0 12px;
+}
+.hbars__labels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.hbars__labels li {
+  height: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.hbars__labels span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hbars__labels small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lchart {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+.hbars__plot,
+.lchart__plot,
+.lchart__y {
+  display: block;
+  overflow: visible;
+}
+.viz__grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.viz__tick {
+  fill: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.viz__value {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.viz__bar {
+  fill: var(--viz-bar);
+}
+.viz__mark:hover .viz__bar,
+.viz__mark:focus .viz__bar {
+  fill: var(--viz-bar-hover);
+}
+.viz__hit {
+  fill: transparent;
+}
+.viz__mark:focus,
+.viz__col:focus {
+  outline: none;
+}
+.viz__line--median,
+.viz__line--mean,
+.viz__line--own {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.viz__line--median {
+  stroke: var(--viz-median);
+}
+.viz__line--mean {
+  stroke: var(--viz-mean);
+}
+.viz__line--own {
+  stroke: var(--viz-own);
+}
+.viz__dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.viz__dot.viz__line--median {
+  fill: var(--viz-median);
+}
+.viz__dot.viz__line--mean {
+  fill: var(--viz-mean);
+}
+.viz__range {
+  stroke: var(--viz-median);
+  stroke-opacity: 0.16;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+.viz__cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0;
+}
+.viz__col:hover .viz__cross,
+.viz__col:focus .viz__cross {
+  opacity: 1;
+}
+.viz__table {
+  margin-top: 8px;
+  font-size: 14px;
+}
+.viz__table summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.viz-tip {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.viz-tip__title {
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.viz-tip__row b {
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
+}
+.viz-tip__row span {
+  color: var(--muted);
+}
+.proofs__filter {
+  margin-bottom: 8px;
+}
+.proofs__filter .field {
+  max-width: 320px;
+}
+.proofs td {
+  vertical-align: top;
+}
+.proofs q {
+  quotes: '«' '»';
 }
