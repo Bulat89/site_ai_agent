@@ -1,4 +1,5 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { MemoryStore } from '../src/store/memory.js';
 import { PostgresStore } from '../src/store/postgres.js';
 import type { Store } from '../src/store/types.js';
@@ -84,5 +85,30 @@ describe.each(stores)('%s store', (_name, make) => {
     await store.deleteSession(live);
     expect(await store.sessionUser(live)).toBeNull();
     await store.ping();
+  });
+});
+
+describe.skipIf(!DB)('postgres store: a connection the database closes', () => {
+  it('does not stop the site, and the next query opens a new one', async () => {
+    // A restart of the database closes its idle connections; the «error» of the pool had no
+    // listener, and the uncaught exception stopped the whole site.
+    const url = new URL(DB!);
+    url.searchParams.set('application_name', 'site_idle_test');
+    const warnings: string[] = [];
+    const log = { warn: (_obj: unknown, msg: string) => warnings.push(msg) } as never;
+    const store = await PostgresStore.connect(url.toString(), log);
+    open.push(store);
+    const admin = new pg.Client({ connectionString: DB });
+    await admin.connect();
+    try {
+      const { rowCount } = await admin.query(
+        `select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'site_idle_test'`,
+      );
+      expect(rowCount).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(warnings).toContain('idle database connection lost'));
+      expect(await store.getUser('nobody')).toBeNull();
+    } finally {
+      await admin.end();
+    }
   });
 });

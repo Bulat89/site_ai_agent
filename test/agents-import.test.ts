@@ -139,6 +139,36 @@ describe('agents page: the card is read while the Goldfish server restarts', () 
       'agents import: goldfish unavailable',
     ]);
   });
+
+  it('the agents and prices pages say it restarts and reload themselves, out of the error journal', async () => {
+    // 2026-10-14 16:38: a deploy of Goldfish gave the agents page «unavailable» and an error.
+    const lines: Array<{ level: number; msg: string }> = [];
+    const log = pino({ level: 'info' }, { write: (line: string) => lines.push(JSON.parse(line)) });
+    t = await startApp({}, undefined, log);
+    const cookies = await signIn(t);
+    t.fakes.goldfishRestarting = true;
+    for (const [url, msg] of [
+      ['/agents', 'agents page: goldfish restarting, the page reloads'],
+      ['/agents/prices', 'prices page: goldfish restarting, the page reloads'],
+    ] as const) {
+      const res = await t.app.inject({ url, cookies });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers.refresh).toBe('15');
+      expect(res.body).toContain('Сервер агентов перезапускается — страница обновится сама');
+      expect(lines.filter((l) => l.msg === msg).map((l) => l.level)).toEqual([30]);
+    }
+    expect(lines.filter((l) => l.level >= 50)).toEqual([]);
+
+    // A server that cannot be reached at all stays an error, and the page does not reload.
+    t.fakes.goldfishRestarting = false;
+    t.fakes.goldfishDown = true;
+    const down = await t.app.inject({ url: '/agents', cookies });
+    expect(down.headers.refresh).toBeUndefined();
+    expect(down.body).toContain('Сервер агентов сейчас недоступен');
+    expect(lines.filter((l) => l.level >= 50).map((l) => l.msg)).toEqual([
+      'agents page: goldfish unavailable',
+    ]);
+  });
 });
 
 describe('agents page: listings on the platforms and competitors', () => {

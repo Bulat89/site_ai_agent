@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { newId } from '../util/crypto.js';
+import type { Logger } from '../util/logger.js';
 import { MIGRATIONS } from './migrations.js';
 import type { Store, UserRecord, YandexProfileInput } from './types.js';
 
@@ -56,8 +57,15 @@ function toUser(r: UserRow): UserRecord {
 export class PostgresStore implements Store {
   private constructor(private readonly pool: pg.Pool) {}
 
-  static async connect(connectionString: string): Promise<PostgresStore> {
+  static async connect(
+    connectionString: string,
+    log?: Pick<Logger, 'warn'>,
+  ): Promise<PostgresStore> {
     const pool = new pg.Pool({ connectionString, max: 5 });
+    // An idle connection the database closes (a restart, its idle limit, a network blip) is an
+    // «error» of the pool: with no listener it was an uncaught exception that stopped the site.
+    // The pool has dropped that connection already; the next query opens a new one.
+    pool.on('error', (err) => log?.warn({ err }, 'idle database connection lost'));
     const store = new PostgresStore(pool);
     await store.migrate();
     return store;

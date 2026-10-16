@@ -42,6 +42,16 @@ const CSP = [
   "object-src 'none'",
 ].join('; ');
 
+/**
+ * A restart of the Goldfish server: its proxy answers 502–504 for some 20 s on a deploy, longer
+ * than the retries of a read. The pages say so and ask again; it is not an error for the journal.
+ */
+const restarting = (err: unknown): err is GoldfishError =>
+  err instanceof GoldfishError && !!err.status && err.status >= 502 && err.status <= 504;
+/** A page that met the restart reloads itself after this many seconds (the Refresh header). */
+const RELOAD_SECONDS = 15;
+const RESTARTING_NOTICE = `Сервер агентов перезапускается — страница обновится сама через ${RELOAD_SECONDS} с.`;
+
 export async function buildApp(s: Services): Promise<FastifyInstance> {
   const { config, sessions, store } = s;
   const app = Fastify({ loggerInstance: s.log as FastifyBaseLogger, trustProxy: true });
@@ -228,8 +238,15 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         competitorSearch: competitorSearch.status === 200 ? competitorSearch.body : null,
       };
     } catch (err) {
-      req.log.error({ err }, 'agents page: goldfish unavailable');
-      state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+      // 2026-10-14 16:38: the deploy of Goldfish gave the page «unavailable» and the journal an error.
+      if (restarting(err)) {
+        req.log.info({ status: err.status }, 'agents page: goldfish restarting, the page reloads');
+        reply.header('refresh', String(RELOAD_SECONDS));
+        state.error = RESTARTING_NOTICE;
+      } else {
+        req.log.error({ err }, 'agents page: goldfish unavailable');
+        state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+      }
     }
     return reply
       .type('text/html; charset=utf-8')
@@ -270,8 +287,14 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         board: board.body,
       };
     } catch (err) {
-      req.log.error({ err }, 'prices page: goldfish unavailable');
-      state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+      if (restarting(err)) {
+        req.log.info({ status: err.status }, 'prices page: goldfish restarting, the page reloads');
+        reply.header('refresh', String(RELOAD_SECONDS));
+        state.error = RESTARTING_NOTICE;
+      } else {
+        req.log.error({ err }, 'prices page: goldfish unavailable');
+        state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
+      }
     }
     return reply
       .type('text/html; charset=utf-8')
@@ -350,7 +373,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     } catch (err) {
       // The page asks again in 5 s: a restart of the Goldfish server that outlasts the retries
       // of a read (502 for some 20 s at 11:59) is a missed tick, not an error for the journal.
-      if (err instanceof GoldfishError && err.status && err.status >= 502 && err.status <= 504)
+      if (restarting(err))
         req.log.info(
           { status: err.status },
           'agents import: goldfish restarting, the page asks again',
@@ -414,7 +437,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         return reply.code(res.status).send(res.body);
       } catch (err) {
         // Asked again in 5 s, like the card import: a Goldfish restart is a missed tick.
-        if (err instanceof GoldfishError && err.status && err.status >= 502 && err.status <= 504)
+        if (restarting(err))
           req.log.info(
             { status: err.status },
             'agents search: goldfish restarting, the page asks again',
