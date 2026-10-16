@@ -1,4 +1,5 @@
 import type { UserRecord } from '../store/types.js';
+import { botsBlock, type BotsState } from './bots.js';
 import {
   AGENT_TABS,
   ICONS,
@@ -103,6 +104,8 @@ export interface AgentsState extends View {
   profileImport?: ProfileImportView | null;
   listings?: ListingSearchView | null;
   competitorSearch?: CompetitorSearchView | null;
+  /** The bots in the messengers: undefined when the site has no bots server (BOTS_URL). */
+  bots?: BotsState | undefined;
   error: string | null;
 }
 
@@ -290,7 +293,12 @@ const duties = (n: number) => {
  * What the owner sees first on every tab: who works, the wave, a pause, what waits for them and
  * whether Telegram is linked — each a link to the place where it is changed.
  */
-function statusStrip(h: HotelView, approvals: ApprovalView[]): string {
+/** Whether a chat gets the manager's messages: a bot of the bots server or the Telegram of Goldfish. */
+function messengerLinked(h: HotelView, bots: BotsState | undefined): boolean {
+  return h.telegramLinked || (!!bots && bots !== 'unavailable' && bots.links.length > 0);
+}
+
+function statusStrip(h: HotelView, approvals: ApprovalView[], bots: BotsState | undefined): string {
   const set = h.settings;
   const on = set.agents.filter((a) => a.enabled).length;
   const items: string[] = [];
@@ -311,7 +319,14 @@ function statusStrip(h: HotelView, approvals: ApprovalView[]): string {
       ? `<a class="status status--accent" href="${agentsHref('approvals-title')}">Ждут решения: ${approvals.length}</a>`
       : `<a class="status" href="${agentsHref('approvals-title')}">Решений не ждут</a>`,
   );
-  if (h.telegramBot !== false)
+  if (bots && bots !== 'unavailable') {
+    const linked = [...new Set(bots.links.map((l) => l.title))];
+    items.push(
+      linked.length
+        ? `<a class="status" href="${agentsHref('telegram-title')}">Привязан ${esc(linked.join(', '))}</a>`
+        : `<a class="status status--warn" href="${agentsHref('telegram-title')}">Мессенджер не привязан</a>`,
+    );
+  } else if (h.telegramBot !== false)
     items.push(
       h.telegramLinked
         ? `<a class="status" href="${agentsHref('telegram-title')}">Telegram привязан</a>`
@@ -371,7 +386,7 @@ function kpiTiles(k: KpiView | null): string {
  * «Первые шаги»: what is left before the agents can work, each with a link to the place to do
  * it and to the guide. Hidden once everything is done.
  */
-function firstSteps(h: HotelView): string {
+function firstSteps(h: HotelView, bots: BotsState | undefined): string {
   const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
   const steps: Array<{ done: boolean; title: string; anchor: AgentAnchor; help: string }> = [
     {
@@ -392,12 +407,19 @@ function firstSteps(h: HotelView): string {
       anchor: 'team-title',
       help: 'agent-on',
     },
-    {
-      done: h.telegramLinked,
-      title: 'Привяжите Telegram для сводки и согласований',
-      anchor: 'telegram-title',
-      help: 'tg-link',
-    },
+    bots
+      ? {
+          done: messengerLinked(h, bots),
+          title: 'Привяжите Telegram, MAX или WhatsApp для сводки, согласований и задач',
+          anchor: 'telegram-title',
+          help: 'bots',
+        }
+      : {
+          done: h.telegramLinked,
+          title: 'Привяжите Telegram для сводки и согласований',
+          anchor: 'telegram-title',
+          help: 'tg-link',
+        },
   ];
   const left = steps.filter((x) => !x.done).length;
   if (!left) return '';
@@ -1261,7 +1283,7 @@ export function renderAgents(s: AgentsState): string {
   const guest = h.settings.platforms
     .filter((p) => p.category === 'guest')
     .map((p) => ({ id: p.id, title: p.title }));
-  const today = `  ${firstSteps(h)}
+  const today = `  ${firstSteps(h, s.bots)}
   <section class="card" aria-labelledby="approvals-title">
     <div class="card__head"><h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
     ${approvalsBlock(s.approvals, agents)}
@@ -1298,8 +1320,8 @@ export function renderAgents(s: AgentsState): string {
     ${platformsBlock(h)}
   </section>
   <section class="card" aria-labelledby="telegram-title">
-    <div class="card__head"><h2 id="telegram-title">Управляющий и Telegram</h2>${helpLink('tg-quiet', 'Как настроить?')}</div>
-    ${telegramBlock(h)}
+    <div class="card__head"><h2 id="telegram-title">${s.bots ? 'Управляющий и мессенджеры' : 'Управляющий и Telegram'}</h2>${helpLink(s.bots ? 'bots' : 'tg-quiet', 'Как настроить?')}</div>
+    ${s.bots ? `<p class="hint hint--top">Привяжите Telegram, MAX или WhatsApp: туда придут сводка, срочное и согласования, оттуда можно поручать агентам задачи.</p>${botsBlock(s.bots, { unlink: true, refreshHref: agentsHref('telegram-title') })}` : telegramBlock(h)}
     ${ownerForm(h)}
   </section>
   <section class="card" aria-labelledby="hooks-title">
@@ -1315,7 +1337,7 @@ export function renderAgents(s: AgentsState): string {
     <div class="hero__text">
       <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
       <h1>${name ? esc(name) : 'Ваш объект'}</h1>
-      ${statusStrip(h, s.approvals)}
+      ${statusStrip(h, s.approvals, s.bots)}
     </div>
   </section>
   ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
