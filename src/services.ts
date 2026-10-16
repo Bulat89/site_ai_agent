@@ -25,7 +25,9 @@ export async function createServices(
 ): Promise<Services> {
   const store =
     overrides.store ??
-    (config.DATABASE_URL ? await PostgresStore.connect(config.DATABASE_URL) : new MemoryStore());
+    (config.DATABASE_URL
+      ? await PostgresStore.connect(config.DATABASE_URL, log)
+      : new MemoryStore());
   if (!overrides.store && !config.DATABASE_URL)
     log.warn('DATABASE_URL is not set: users and sessions are kept in memory');
   const goldfish = new GoldfishAdmin(config, overrides.fetch, overrides.retryDelaysMs);
