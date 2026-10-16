@@ -47,6 +47,17 @@ const EnvSchema = z
       .default('true')
       .transform((v) => v === 'true' || v === '1' || v === 'yes'),
 
+    /**
+     * The bots server (repository tg_goldfish): the cabinet shows QR codes that link Telegram, MAX
+     * and WhatsApp to the manager agent. Without it — the Goldfish server's own Telegram bot.
+     */
+    BOTS_URL: url.optional(),
+    /** BOTS_API_TOKEN of the bots server. */
+    BOTS_API_TOKEN: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{32,256}$/, '32–256 characters A-Za-z0-9_-')
+      .optional(),
+
     /** Extension zip to hand out; when unset or missing it is taken from GOLDFISH_URL. */
     EXTENSION_ZIP: z.string().optional(),
     /** Optional links in the footer. */
@@ -68,6 +79,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config = res.data;
   if (config.NODE_ENV === 'production' && !config.DATABASE_URL)
     throw new Error('Invalid configuration: DATABASE_URL is required in production');
+  if (!!config.BOTS_URL !== !!config.BOTS_API_TOKEN)
+    throw new Error('Invalid configuration: BOTS_URL and BOTS_API_TOKEN are set together');
   return config;
 }
 

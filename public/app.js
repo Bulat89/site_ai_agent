@@ -472,47 +472,209 @@ if (ownerForm) {
   );
 }
 
-// ------------------------------------------------ today: approvals
+// ------------------------------------------------ today: approvals, live
 
-document.querySelectorAll('[data-act="approve"], [data-act="reject"]').forEach((button) =>
-  button.addEventListener(
-    'click',
-    guarded(async () => {
-      button.disabled = true;
-      const decision = button.getAttribute('data-act');
-      await agentsCall('POST', `/api/agents/approvals/${button.getAttribute('data-id')}`, {
-        decision,
-      });
-      reloadWith(decision === 'approve' ? 'Согласовано — агент выполнит.' : 'Отклонено.');
-    }),
-  ),
-);
+// «Сегодня» is the same desk the extension and the messenger bots show. While it is open it asks
+// for itself again and puts the new one in place when something changed — a decision taken in
+// Telegram shows here without a reload. Not while the owner is editing a text or deciding.
 
-document.querySelectorAll('[data-act="edit-open"]').forEach((button) =>
-  button.addEventListener('click', () => {
-    const form = document.querySelector(
-      `form[data-form="edit"][data-id="${button.getAttribute('data-id')}"]`,
+const todayPanel = document.querySelector('[data-panel="today"]');
+const TODAY_EVERY_MS = 20_000;
+let todayBusy = false;
+let todayTimer = 0;
+
+function editingToday() {
+  return (
+    !!todayPanel &&
+    (!!todayPanel.querySelector('form[data-form="edit"]:not([hidden])') ||
+      todayPanel.contains(document.activeElement && document.activeElement.closest('textarea')))
+  );
+}
+
+async function refreshToday({ force = false } = {}) {
+  if (!todayPanel || todayBusy || (!force && editingToday())) return;
+  todayBusy = true;
+  try {
+    const res = await fetch('/api/agents/today', { credentials: 'same-origin' });
+    if (res.status === 401) return;
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!force && data.rev && data.rev === todayPanel.getAttribute('data-rev')) return;
+    todayPanel.innerHTML = data.today;
+    if (data.rev) todayPanel.setAttribute('data-rev', data.rev);
+    const strip = document.querySelector('[data-statuses]');
+    if (strip && data.strip) strip.outerHTML = data.strip;
+    const tab = document.querySelector('.tabs [data-tab="today"]');
+    if (tab) {
+      const old = tab.querySelector('.tabs__count');
+      if (old) old.remove();
+      if (data.count) tab.insertAdjacentHTML('beforeend', data.count);
+    }
+  } catch {
+    // No connection right now: the next tick asks again.
+  } finally {
+    todayBusy = false;
+  }
+}
+
+function scheduleToday() {
+  clearTimeout(todayTimer);
+  if (!todayPanel || document.visibilityState !== 'visible') return;
+  todayTimer = setTimeout(async () => {
+    await refreshToday();
+    scheduleToday();
+  }, TODAY_EVERY_MS);
+}
+
+if (todayPanel) {
+  scheduleToday();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshToday().finally(scheduleToday);
+    else clearTimeout(todayTimer);
+  });
+}
+
+/** The card fades while the decision goes; then «Сегодня» is redrawn from the desk. */
+async function decide(id, body, card, done) {
+  if (card) card.classList.add('approval--busy');
+  card?.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  try {
+    const data = await agentsCall('POST', `/api/agents/approvals/${encodeURIComponent(id)}`, body);
+    showStatus(
+      `${done}: «${data.title || 'согласование'}».${data.comment ? ` ${data.comment}` : ''}`,
     );
+  } catch (err) {
+    if (card) card.classList.remove('approval--busy');
+    card?.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    showError(err.message);
+  }
+  await refreshToday({ force: true });
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest(
+    '[data-act="approve"], [data-act="reject"], [data-act="edit-open"]',
+  );
+  if (!button) return;
+  const id = button.getAttribute('data-id');
+  const act = button.getAttribute('data-act');
+  const card = button.closest('[data-approval]');
+  if (act === 'edit-open') {
+    const form = card && card.querySelector('form[data-form="edit"]');
     if (form) {
       form.hidden = !form.hidden;
       if (!form.hidden) form.elements.text.focus();
     }
-  }),
-);
+    return;
+  }
+  decide(id, { decision: act }, card, act === 'approve' ? 'Согласовано' : 'Отклонено');
+});
 
-document.querySelectorAll('form[data-form="edit"]').forEach((form) =>
-  form.addEventListener(
-    'submit',
+document.addEventListener('submit', (event) => {
+  const form = event.target.closest('form[data-form="edit"]');
+  if (!form) return;
+  event.preventDefault();
+  const text = form.elements.text.value.trim();
+  if (!text) return showError('Напишите новый текст.');
+  decide(
+    form.getAttribute('data-id'),
+    { decision: 'edit', text },
+    form.closest('[data-approval]'),
+    'Изменено и согласовано',
+  );
+});
+
+// ------------------------------------------------ the manager in messengers: QR codes
+
+const messengers = document.querySelector('[data-messengers]');
+let linkTimer = 0;
+
+/** While the QR codes are on screen: as soon as the bot links a chat, the page says so. */
+function waitForLink(known, until) {
+  clearInterval(linkTimer);
+  linkTimer = setInterval(async () => {
+    if (Date.now() > Date.parse(until)) return clearInterval(linkTimer);
+    try {
+      const res = await fetch('/api/agents/messengers', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.links.length > known) {
+        clearInterval(linkTimer);
+        const fresh = data.links.reduce((a, b) => (a.linkedAt > b.linkedAt ? a : b));
+        reloadWith(
+          `Готово: ${fresh.title} привязан. Управляющий пришлёт туда сводку, срочное и согласования.`,
+        );
+      }
+    } catch {
+      // Asked again in a few seconds.
+    }
+  }, 4000);
+}
+
+if (messengers) {
+  const grid = messengers.querySelector('[data-qr]');
+  const hint = messengers.querySelector('[data-qr-hint]');
+  messengers.addEventListener(
+    'click',
     guarded(async (event) => {
-      event.preventDefault();
-      await agentsCall('POST', `/api/agents/approvals/${form.getAttribute('data-id')}`, {
-        decision: 'edit',
-        text: form.elements.text.value,
-      });
-      reloadWith('Изменено и согласовано.');
+      const codes = event.target.closest('[data-act="messenger-codes"]');
+      const unlink = event.target.closest('[data-act="messenger-unlink"]');
+      if (codes) {
+        codes.disabled = true;
+        const data = await agentsCall('POST', '/api/agents/messengers/codes');
+        grid.textContent = '';
+        for (const o of data.offers) {
+          const fig = document.createElement('figure');
+          fig.className = `qr qr--${o.channel}`;
+          const img = document.createElement('img');
+          img.src = o.qr;
+          img.alt = `QR-код ${o.title}`;
+          img.width = 180;
+          img.height = 180;
+          const cap = document.createElement('figcaption');
+          const title = document.createElement('b');
+          title.textContent = o.title;
+          const open = document.createElement('a');
+          open.href = o.url;
+          open.target = '_blank';
+          open.rel = 'noopener';
+          open.textContent = 'Открыть здесь';
+          const code = document.createElement('span');
+          code.className = 'hint';
+          code.textContent = `или отправьте боту код ${o.code}`;
+          cap.append(title, open, code);
+          fig.append(img, cap);
+          grid.append(fig);
+        }
+        const until = new Date(data.expiresAt).toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        hint.textContent = data.offers.length
+          ? `Наведите камеру телефона на код нужного мессенджера — откроется чат с ботом, и он привяжется сам. Коды одноразовые, действуют до ${until}. Привязать можно и чат администратора.`
+          : 'Боты ещё не подключены ни к одному мессенджеру.';
+        grid.hidden = !data.offers.length;
+        hint.hidden = false;
+        codes.disabled = false;
+        codes.textContent = 'Новые QR-коды';
+        waitForLink(
+          messengers.querySelectorAll('[data-act="messenger-unlink"]').length,
+          data.expiresAt,
+        );
+      } else if (unlink) {
+        const title = unlink.getAttribute('data-title');
+        if (!(await askConfirm(`Отвязать ${title}? Сообщения управляющего туда больше не придут.`)))
+          return;
+        unlink.disabled = true;
+        await agentsCall('POST', '/api/agents/messengers/unlink', {
+          channel: unlink.getAttribute('data-channel'),
+          chatId: unlink.getAttribute('data-chat'),
+        });
+        reloadWith(`${title}: чат отвязан.`);
+      }
     }),
-  ),
-);
+  );
+}
 
 const telegramButton = document.querySelector('[data-act="telegram"]');
 if (telegramButton) {

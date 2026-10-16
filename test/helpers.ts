@@ -10,6 +10,8 @@ import { pkceChallenge, sha256 } from '../src/util/crypto.js';
 export const PUBLIC_URL = 'https://site.test';
 export const GOLDFISH_URL = 'https://agent.test';
 export const ADMIN_TOKEN = 'admin-token-0123456789';
+export const BOTS_URL = 'https://bots.test';
+export const BOTS_TOKEN = 'bots-token-0123456789-0123456789-ab';
 
 export function testConfig(env: Record<string, string> = {}): Config {
   return loadConfig({
@@ -382,6 +384,21 @@ export class Fakes {
       createdAt: '2026-10-08T07:00:00.000Z',
     },
   ];
+  /** GET …/hotel/manager: false — an older Goldfish without the desk (404). */
+  deskSupported = true;
+  /** Decisions taken, for «Решено недавно». */
+  decided: Array<Record<string, unknown>> = [];
+  deskRev = 'rev_1';
+  // Bots server
+  botsDown = false;
+  readonly botsCalls: string[] = [];
+  messengerLinks: Array<{
+    channel: string;
+    title: string;
+    chatId: string;
+    name: string | null;
+    linkedAt: string;
+  }> = [];
   extensionZip: Buffer | null = Buffer.from('PK\u0003\u0004fake-zip');
   readonly calls: string[] = [];
   private seq = 0;
@@ -398,8 +415,108 @@ export class Fakes {
       return json(this.profile);
     }
     if (url.host === 'agent.test') return this.goldfish(method, url, headers, init?.body);
+    if (url.host === 'bots.test') return this.bots(method, url, headers);
     throw new TypeError(`fetch failed: ${url}`);
   };
+
+  /** The desk the Goldfish server would give for the fake's approvals. */
+  desk() {
+    const titles = new Map(this.hotel.settings.agents.map((a) => [a.id, a.title]));
+    return {
+      rev: this.deskRev,
+      property: { name: this.hotel.profile.name, timezone: 'Europe/Moscow' },
+      status: {
+        agentsOn: this.hotel.settings.agents.filter((a) => a.enabled).length,
+        agentsTotal: this.hotel.settings.agents.length,
+        wave: this.hotel.settings.wave,
+        waveTitle: 'Наблюдают',
+        pause: null,
+        pending: this.approvals.length,
+        urgent: this.approvals.filter((a) => a.urgent).length,
+        line: '',
+      },
+      approvals: this.approvals.map((a) => ({
+        ...a,
+        agentTitle: titles.get(a.agent) ?? a.agent,
+        duty: 'channels.fix',
+        text: a.action.text ?? null,
+        editable: a.action.kind !== 'none',
+        remindedAt: null,
+        expiresAt: new Date(Date.parse(a.createdAt) + 72 * 3_600_000).toISOString(),
+      })),
+      decided: this.decided,
+      feed: [
+        {
+          id: 'out_1',
+          kind: 'summary',
+          kindTitle: 'Сводка',
+          mark: '☀️',
+          text: 'Доброе утро! Сегодня заездов — 1.',
+          approvalId: null,
+          decided: null,
+          sentAt: '2026-10-08T06:00:00.000Z',
+          folded: false,
+          createdAt: '2026-10-08T06:00:00.000Z',
+        },
+      ],
+      kpi: [
+        { id: 'next30', label: 'Загрузка вперёд', value: '48%', sub: 'на 30 дней' },
+        { id: 'adr', label: 'ADR', value: '5 200 ₽', sub: 'средняя цена ночи' },
+        { id: 'rating', label: 'Рейтинг', value: '4,7', sub: 'на площадках' },
+      ],
+    };
+  }
+
+  private bots(method: string, url: URL, headers: Headers): Response {
+    if (this.botsDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
+    this.botsCalls.push(`${method} ${url.pathname}`);
+    if (headers.get('authorization') !== `Bearer ${BOTS_TOKEN}`)
+      return json({ error: 'unauthorized' }, 401);
+    const m = /^\/api\/owners\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
+    if (!m) return json({ error: 'not_found' }, 404);
+    const sub = m[3] ?? '';
+    if (method === 'GET' && sub === '')
+      return json({
+        channels: [
+          { id: 'telegram', title: 'Telegram' },
+          { id: 'max', title: 'MAX' },
+          { id: 'whatsapp', title: 'WhatsApp' },
+        ],
+        links: this.messengerLinks,
+      });
+    if (method === 'POST' && sub === '/codes')
+      return json(
+        {
+          expiresAt: '2026-10-16T22:00:00.000Z',
+          offers: [
+            {
+              channel: 'telegram',
+              title: 'Telegram',
+              url: 'https://t.me/goldfish_bot?start=K7Q2M9XZ',
+              code: 'K7Q2M9XZ',
+            },
+            {
+              channel: 'whatsapp',
+              title: 'WhatsApp',
+              url: 'https://wa.me/79990001122?text=Код%20Goldfish%3A%20W3R5T8YU',
+              code: 'W3R5T8YU',
+            },
+          ],
+        },
+        201,
+      );
+    const unlink = /^\/links\/([^/]+)\/([^/]+)$/.exec(sub);
+    if (method === 'DELETE' && unlink) {
+      const before = this.messengerLinks.length;
+      this.messengerLinks = this.messengerLinks.filter(
+        (l) => !(l.channel === unlink[1] && l.chatId === decodeURIComponent(unlink[2]!)),
+      );
+      return before === this.messengerLinks.length
+        ? json({ error: 'not_found' }, 404)
+        : new Response(null, { status: 204 });
+    }
+    return json({ error: 'not_found' }, 404);
+  }
 
   /** Registers a code as Yandex would after the user approves. */
   approve(code: string, challenge: string): void {
@@ -474,6 +591,8 @@ export class Fakes {
         body,
       });
       if (method === 'GET' && sub === '') return json(this.hotel);
+      if (method === 'GET' && sub === '/manager')
+        return this.deskSupported ? json(this.desk()) : json({ error: 'not_found' }, 404);
       if (method === 'GET' && sub === '/approvals') return json(this.approvals);
       if (method === 'GET' && sub === '/kpi')
         return json({

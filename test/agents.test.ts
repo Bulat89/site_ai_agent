@@ -4,6 +4,15 @@ import { PUBLIC_URL, signIn, startApp, type TestApp } from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
 
+const APPROVAL = {
+  agent: 'channels',
+  title: 'Срочно: овербукинг',
+  reason: 'Люкс продан дважды',
+  cost: null,
+  action: { kind: 'none' },
+  createdAt: '2026-10-08T07:00:00.000Z',
+};
+
 let t: TestApp;
 afterEach(async () => {
   await t?.app.close();
@@ -60,15 +69,95 @@ describe('agents page', () => {
     expect(html).toContain('data-platform="ostrovok"');
     expect(html).not.toContain('data-platform="avito"');
     expect(html).toContain('Доброе утро! Сегодня заездов — 1.');
+    // One desk for the site, the extension and the bots.
     const user = t.fakes.hotelCalls.map((c) => c.path);
-    expect(user).toEqual(
+    expect(user).toEqual(expect.arrayContaining(['yandex:1000001 ', 'yandex:1000001 /manager']));
+    expect(user).not.toContain('yandex:1000001 /kpi');
+    expect(html).toContain('data-panel="today" data-rev="rev_1"');
+  });
+
+  it('an older Goldfish without the desk: the page makes it of the separate answers', async () => {
+    t = await startApp();
+    t.fakes.deskSupported = false;
+    const cookies = await signIn(t);
+    const html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('Исправить расхождения на площадках: 2');
+    expect(html).toContain('Каналы продаж · ');
+    expect(html).toMatch(/5\s200 ₽/u);
+    expect(html).toContain('☀️ Сводка');
+    expect(t.fakes.hotelCalls.map((c) => c.path)).toEqual(
       expect.arrayContaining([
-        'yandex:1000001 ',
+        'yandex:1000001 /manager',
         'yandex:1000001 /approvals?status=pending',
         'yandex:1000001 /kpi',
         'yandex:1000001 /feed?limit=20',
       ]),
     );
+  });
+
+  it('«Сегодня» shows what was decided and where; it asks for itself again while open', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    t.fakes.decided = [
+      {
+        id: 'apr_0',
+        agent: 'reputation',
+        agentTitle: 'Репутация',
+        title: 'Ответ на отзыв 5★',
+        status: 'approved',
+        outcome: 'Согласовано в Telegram',
+        mark: '✅',
+        place: 'telegram',
+        comment: 'опубликовано',
+        decidedAt: '2026-10-08T08:00:00.000Z',
+      },
+    ];
+    let html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(html).toContain('<summary>Решено недавно</summary>');
+    expect(html).toContain('Репутация · Согласовано в Telegram · ');
+    // The card: who, why, the draft, three buttons, and when it expires.
+    expect(html).toContain('data-approval="apr_1"');
+    expect(html).toContain('<span class="approval__label">Почему:</span>');
+    expect(html).toMatch(/data-act="reject"[^>]*>Отклонить<\/button>/);
+    expect(html).toContain('class="approval__left"');
+
+    // The approval was decided in a messenger: the live «Сегодня» has it no more.
+    t.fakes.approvals = [];
+    t.fakes.deskRev = 'rev_2';
+    const live = await t.app.inject({ url: '/api/agents/today', cookies });
+    expect(live.statusCode).toBe(200);
+    expect(live.headers['cache-control']).toContain('no-store');
+    const data = live.json();
+    expect(data).toMatchObject({ rev: 'rev_2', pending: 0, count: '' });
+    expect(data.today).toContain('Ничего не ждёт вашего решения');
+    expect(data.today).not.toContain('data-approval="apr_1"');
+    expect(data.strip).toContain('Решений не ждут');
+    expect((await t.app.inject({ url: '/api/agents/today' })).statusCode).toBe(401);
+
+    // An urgent one makes the count and the state red.
+    t.fakes.approvals = [
+      { ...t.fakes.approvals[0], ...APPROVAL, id: 'apr_2', urgent: true } as never,
+    ];
+    html = (await t.app.inject({ url: '/api/agents/today', cookies })).json().count;
+    expect(html).toContain('tabs__count--urgent');
+  });
+
+  it('a decision on the site is marked as taken on the site', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    const r = await t.app.inject({
+      method: 'POST',
+      url: '/api/agents/approvals/apr_1',
+      cookies,
+      payload: { decision: 'reject', via: 'telegram' },
+      headers: origin,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(t.fakes.hotelCalls.at(-1)).toEqual({
+      method: 'POST',
+      path: 'yandex:1000001 /approvals/apr_1',
+      body: { decision: 'reject', via: 'site' },
+    });
   });
 
   it('opens on «Сегодня»; `?tab=` opens another tab, every tab is in the page', async () => {
