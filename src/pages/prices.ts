@@ -1,5 +1,5 @@
 import type { UserRecord } from '../store/types.js';
-import { esc, header, helpLink, layout, type View } from './page.js';
+import { agentsHref, esc, header, helpLink, layout, type View } from './page.js';
 
 /**
  * «Цены»: the direct competitors the pricing agent chose, the average and the median of their
@@ -345,7 +345,7 @@ function recommendationBlock(b: PriceBoardView): string {
   const rec = b.recommendation;
   if (!rec || !st)
     return `<p class="notice" role="status">${esc(b.note ? b.note[0]!.toUpperCase() + b.note.slice(1) : 'Рекомендации пока нет')}.</p>
-<p><a class="btn btn--ghost btn--sm" href="/agents#competitors-title">К поиску конкурентов</a></p>`;
+<p><a class="btn btn--ghost btn--sm" href="${agentsHref('competitors-title')}">К поиску конкурентов</a></p>`;
   const tiles: Array<[string, string, string?]> = [
     ['Медиана', rub(st.median), 'половина конкурентов дешевле, половина дороже'],
     ['Средняя', rub(st.mean)],
@@ -416,7 +416,7 @@ ${b.competitors
   .join('\n')}
   </tbody>
 </table></div>
-<p class="hint">Не согласны с агентом — ответьте «Нет» или «Прямой конкурент» в блоке «Конкуренты» на <a href="/agents#competitors-title">странице агентов</a>: он учтёт ваш ответ в следующих поисках.</p>`;
+<p class="hint">Не согласны с агентом — ответьте «Нет» или «Прямой конкурент» в блоке «Конкуренты» на <a href="${agentsHref('competitors-title')}">странице агентов</a>: он учтёт ваш ответ в следующих поисках.</p>`;
 }
 
 /** Every price with the words of its page: the proof of each number on this page. */
@@ -502,7 +502,7 @@ export function renderPrices(s: PricesState): string {
 <main class="wrap agents prices">
   <section class="hero hero--user">
     <div class="hero__text">
-      <p class="eyebrow"><a href="/">Кабинет</a> · <a href="/agents">агенты объекта</a> · цены</p>
+      <p class="eyebrow"><a href="/">Кабинет</a> · <a href="/agents?tab=property">агенты объекта</a> · цены</p>
       <h1>Цены${s.hotelName ? ` — ${esc(s.hotelName)}` : ''}</h1>
       <p class="lead">Агент «Цены и загрузка» сам отбирает прямых конкурентов — сравнивает тип, описание, номера, удобства, место и цену — и считает по ним среднюю и медиану. Каждая цифра здесь — с цитатой со страницы и ссылкой на неё.</p>
     </div>

@@ -49,8 +49,17 @@ describe('user guide', () => {
     for (const id of intoGuide) expect(helpIds, `/help#${id}`).toContain(id);
     for (const id of links(help, '')) expect(helpIds, `#${id}`).toContain(id);
 
-    const agentIds = ids(agents);
-    for (const id of links(help, '/agents')) expect(agentIds, `/agents#${id}`).toContain(id);
+    // Every link to the agents page opens the tab its anchor is on, also without a script.
+    expect(links(help, '/agents')).toEqual([]);
+    const toAgents = [...help.matchAll(/href="\/agents\?tab=(\w+)#([^"]+)"/g)];
+    expect(toAgents.length).toBeGreaterThan(10);
+    for (const [, tab, id] of toAgents) {
+      const panel = new RegExp(`data-panel="${tab}"[^>]*>((?:(?!data-panel=)[\\s\\S])*)`).exec(
+        agents,
+      )?.[1];
+      expect(panel, `/agents?tab=${tab}`).toBeDefined();
+      expect(ids(panel!), `/agents?tab=${tab}#${id}`).toContain(id!);
+    }
     const cabinetIds = ids(cabinet);
     for (const id of links(help, '/')) expect(cabinetIds, `/#${id}`).toContain(id);
   });
@@ -60,6 +69,6 @@ describe('user guide', () => {
     const cookies = await signIn(t);
     const html = (await t.app.inject({ url: '/agents', cookies })).body;
     expect(html).toMatch(/Первые шаги · осталось \d из 4/);
-    expect(html).toContain('href="#telegram-title">Привяжите Telegram');
+    expect(html).toContain('href="/agents?tab=settings#telegram-title">Привяжите Telegram');
   });
 });

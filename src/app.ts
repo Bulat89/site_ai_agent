@@ -9,7 +9,13 @@ import { isSecure } from './config.js';
 import { openExtension } from './extension.js';
 import { GoldfishError } from './goldfish/admin.js';
 import { renderHelp } from './pages/help.js';
-import { renderNotFound, renderPage, type Notice } from './pages/page.js';
+import {
+  AGENT_TABS,
+  renderNotFound,
+  renderPage,
+  type AgentTab,
+  type Notice,
+} from './pages/page.js';
 import { renderPrices, type PriceBoardView } from './pages/prices.js';
 import {
   renderAgents,
@@ -205,9 +211,11 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     if (!user) return reply.redirect('/auth/yandex');
     if (!accessOf(user).allowed) return reply.redirect('/');
     const gf = goldfishUserId(user);
+    const tab = (req.query as { tab?: string }).tab;
     let state: Parameters<typeof renderAgents>[0] = {
       ...view,
       user,
+      tab: AGENT_TABS.includes(tab as AgentTab) ? (tab as AgentTab) : 'today',
       hotel: null,
       approvals: [],
       kpi: null,

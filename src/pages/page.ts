@@ -23,6 +23,30 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 export const helpLink = (id: string, text = 'Как это сделать?') =>
   `<a class="help-link" href="/help#${esc(id)}">${esc(text)}</a>`;
 
+/** Tabs of the agents page («Сегодня», «Команда», «Объект», «Настройки»), opened by `?tab=`. */
+export const AGENT_TABS = ['today', 'team', 'property', 'settings'] as const;
+export type AgentTab = (typeof AGENT_TABS)[number];
+
+/** The tab of the agents page each of its anchors is on. */
+const ANCHOR_TAB = {
+  'first-title': 'today',
+  'approvals-title': 'today',
+  'kpi-title': 'today',
+  'feed-title': 'today',
+  'launch-title': 'team',
+  'team-title': 'team',
+  'profile-title': 'property',
+  'listings-title': 'property',
+  'competitors-title': 'property',
+  'platforms-title': 'settings',
+  'telegram-title': 'settings',
+  'hooks-title': 'settings',
+} as const satisfies Record<string, AgentTab>;
+export type AgentAnchor = keyof typeof ANCHOR_TAB;
+
+/** A place on the agents page: its tab opens without a script too, then the anchor. */
+export const agentsHref = (anchor: AgentAnchor) => `/agents?tab=${ANCHOR_TAB[anchor]}#${anchor}`;
+
 const NOTICE_TEXT: Record<Notice, string> = {
   login_denied: 'Вход отменён. Чтобы получить доступ, разрешите сайту доступ к профилю Яндекс ID.',
   login_expired: 'Ссылка для входа устарела. Нажмите «Войти» ещё раз.',
@@ -34,7 +58,7 @@ const LOGO = `<svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="
 
 const YANDEX_MARK = `<svg class="ya" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="#fc3f1d"/><text x="12" y="17" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" fill="#fff">Я</text></svg>`;
 
-const ICONS = {
+export const ICONS = {
   channels: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/><path d="m17 15 2 2 3-4"/></svg>`,
   prices: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>`,
   guests: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 10h8"/></svg>`,
