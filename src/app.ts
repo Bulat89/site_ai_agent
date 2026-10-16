@@ -88,6 +88,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     goldfishUrl: config.GOLDFISH_URL,
     privacyUrl: config.PRIVACY_URL,
     supportEmail: config.SUPPORT_EMAIL,
+    sessionDays: config.SESSION_DAYS,
   };
 
   app.get('/healthz', async () => ({ ok: true }));

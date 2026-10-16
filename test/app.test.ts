@@ -55,6 +55,39 @@ describe('landing page', () => {
     expect(touch.headers['content-type']).toBe('image/png');
   });
 
+  it('explains why, how it works, security and personal data; the links hold after sign-in', async () => {
+    t = await startApp({ SUPPORT_EMAIL: 'help@site.test', SESSION_DAYS: '14' });
+    const ids = (html: string) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!));
+    const landing = (await t.app.inject('/')).body;
+    for (const title of [
+      'Зачем это нужно',
+      'Как это работает',
+      'Решения — за вами',
+      'Безопасность',
+      'Персональные данные',
+      'Что и где хранится',
+      'Вопросы',
+    ])
+      expect(landing).toContain(`>${title}</h`);
+    // How personal data changes on its way: the value, the placeholder the model sees, the value.
+    expect(landing).toContain('<code class="ph">{{phone_1}}</code>');
+    expect(landing).toContain('<mark class="pd">anna@mail.ru</mark>');
+    expect(landing).toContain('14 дней');
+    expect(landing).toContain('href="mailto:help@site.test"');
+    // Every in-page link of the header, the footer and the hero lands on a section.
+    const own = ids(landing);
+    for (const [, id] of landing.matchAll(/href="\/?#([^"]+)"/g))
+      expect(own, `#${id}`).toContain(id);
+
+    // Signed in, the cabinet keeps security and data, which the header and the footer link to.
+    const cabinet = (await t.app.inject({ url: '/', cookies: await signIn(t) })).body;
+    const kept = ids(cabinet);
+    for (const [, id] of cabinet.matchAll(/href="\/#([^"]+)"/g))
+      expect(kept, `/#${id}`).toContain(id);
+    expect(kept).toContain('security');
+    expect(kept).toContain('data');
+  });
+
   it('explains a failed sign-in', async () => {
     t = await startApp();
     expect((await t.app.inject('/?login=denied')).body).toContain('Вход отменён');
