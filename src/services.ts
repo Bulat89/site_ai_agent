@@ -1,5 +1,6 @@
 import { AccessService } from './access.js';
 import { Sessions } from './auth/session.js';
+import { createBots, type BotsClient } from './bots.js';
 import { YandexAuth } from './auth/yandex.js';
 import { isSecure, type Config } from './config.js';
 import { GoldfishAdmin } from './goldfish/admin.js';
@@ -16,6 +17,8 @@ export interface Services {
   yandex: YandexAuth;
   goldfish: GoldfishAdmin;
   access: AccessService;
+  /** The bots in Telegram, MAX and WhatsApp; null when BOTS_URL is not set. */
+  bots: BotsClient | null;
 }
 
 export async function createServices(
@@ -39,5 +42,6 @@ export async function createServices(
     yandex: new YandexAuth(config, overrides.fetch),
     goldfish,
     access: new AccessService(store, goldfish),
+    bots: createBots(config, overrides.fetch),
   };
 }

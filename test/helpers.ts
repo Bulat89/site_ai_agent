@@ -10,6 +10,8 @@ import { pkceChallenge, sha256 } from '../src/util/crypto.js';
 export const PUBLIC_URL = 'https://site.test';
 export const GOLDFISH_URL = 'https://agent.test';
 export const ADMIN_TOKEN = 'admin-token-0123456789';
+export const BOTS_URL = 'https://bots.test';
+export const BOTS_TOKEN = 'bots-token-0123456789-0123456789-abcdef';
 
 export function testConfig(env: Record<string, string> = {}): Config {
   return loadConfig({
@@ -382,6 +384,18 @@ export class Fakes {
       createdAt: '2026-10-08T07:00:00.000Z',
     },
   ];
+  // Bots server (tg_goldfish)
+  /** Chats linked to bots: `owner` is `<clientId>/<userId>`. */
+  readonly botLinks: Array<{
+    owner: string;
+    channel: string;
+    title: string;
+    chatId: string;
+    name: string | null;
+    linkedAt: string;
+  }> = [];
+  botsDown = false;
+  readonly botCalls: string[] = [];
   extensionZip: Buffer | null = Buffer.from('PK\u0003\u0004fake-zip');
   readonly calls: string[] = [];
   private seq = 0;
@@ -398,8 +412,67 @@ export class Fakes {
       return json(this.profile);
     }
     if (url.host === 'agent.test') return this.goldfish(method, url, headers, init?.body);
+    if (url.host === 'bots.test') return this.bots(method, url, headers);
     throw new TypeError(`fetch failed: ${url}`);
   };
+
+  private bots(method: string, url: URL, headers: Headers): Response {
+    if (this.botsDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
+    if (headers.get('authorization') !== `Bearer ${BOTS_TOKEN}`)
+      return json({ error: 'unauthorized' }, 401);
+    const m = /^\/api\/owners\/([^/]+)\/([^/]+)(\/codes|\/links\/([^/]+)\/([^/]+))?$/.exec(
+      url.pathname,
+    );
+    if (!m) return json({ error: 'not_found' }, 404);
+    const owner = `${decodeURIComponent(m[1]!)}/${decodeURIComponent(m[2]!)}`;
+    this.botCalls.push(`${method} ${owner}${m[3] ? m[3].replace(/\/links.*/, '/links') : ''}`);
+    const channels = [
+      { id: 'telegram', title: 'Telegram' },
+      { id: 'max', title: 'MAX' },
+      { id: 'whatsapp', title: 'WhatsApp' },
+    ];
+    if (method === 'GET' && !m[3])
+      return json({
+        channels,
+        links: this.botLinks.filter((l) => l.owner === owner).map(({ owner: _o, ...l }) => l),
+      });
+    if (method === 'POST' && m[3] === '/codes')
+      return json(
+        {
+          expiresAt: '2026-10-16T18:40:00.000Z',
+          offers: [
+            {
+              channel: 'telegram',
+              title: 'Telegram',
+              url: 'https://t.me/goldfish_bot?start=TGCODE23',
+              code: 'TGCODE23',
+            },
+            {
+              channel: 'max',
+              title: 'MAX',
+              url: 'https://max.ru/goldfish_bot?start=MAXCODE2',
+              code: 'MAXCODE2',
+            },
+            {
+              channel: 'whatsapp',
+              title: 'WhatsApp',
+              url: 'https://wa.me/79000000001?text=%D0%9A%D0%BE%D0%B4%20Goldfish%3A%20WACODE23',
+              code: 'WACODE23',
+            },
+          ],
+        },
+        201,
+      );
+    if (method === 'DELETE' && m[4]) {
+      const i = this.botLinks.findIndex(
+        (l) => l.owner === owner && l.channel === m[4] && l.chatId === decodeURIComponent(m[5]!),
+      );
+      if (i < 0) return json({ error: 'not_found' }, 404);
+      this.botLinks.splice(i, 1);
+      return new Response(null, { status: 204 });
+    }
+    return json({ error: 'not_found' }, 404);
+  }
 
   /** Registers a code as Yandex would after the user approves. */
   approve(code: string, challenge: string): void {

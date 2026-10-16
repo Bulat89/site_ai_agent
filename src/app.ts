@@ -27,8 +27,10 @@ import {
   type ListingSearchView,
   type CompetitorSearchView,
 } from './pages/agents.js';
+import type { BotsState } from './pages/bots.js';
 import type { Services } from './services.js';
 import { registerStatic } from './static.js';
+import type { UserRecord } from './store/types.js';
 
 const NOTICES: Record<string, Notice> = {
   denied: 'login_denied',
@@ -100,16 +102,34 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     }
   });
 
+  /**
+   * The owner's bots in the messengers for a page: fresh one-time codes for the QR codes and the
+   * chats already linked. Undefined without a bots server; a silent one is «unavailable» and the
+   * page renders without the codes.
+   */
+  const botsOf = async (user: UserRecord, req: FastifyRequest): Promise<BotsState | undefined> => {
+    if (!s.bots) return undefined;
+    try {
+      const owner = { clientId: await s.goldfish.clientId(), userId: goldfishUserId(user) };
+      return await s.bots.view(owner, true);
+    } catch (err) {
+      req.log.warn({ err }, 'bots server unavailable: the page goes without QR codes');
+      return 'unavailable';
+    }
+  };
+
   app.get('/', async (req, reply) => {
     const user = await sessions.user(req);
     const q = req.query as { login?: string; download?: string };
     const notice: Notice | null =
       (q.login && NOTICES[q.login]) ||
       (q.download === 'unavailable' ? 'download_unavailable' : null);
+    const access = user ? accessOf(user) : null;
+    const bots = user && access?.allowed ? await botsOf(user, req) : undefined;
     return reply
       .type('text/html; charset=utf-8')
       .header('cache-control', 'private, no-store')
-      .send(renderPage({ ...view, user, access: user ? accessOf(user) : null, notice }));
+      .send(renderPage({ ...view, user, access, notice, bots }));
   });
 
   // The guide is public: it also answers «how does it work» before signing in.
@@ -222,6 +242,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       feed: [],
       error: null,
     };
+    const bots = botsOf(user, req);
     try {
       const [hotel, approvals, kpi, feed, profileImport, listings, competitorSearch] =
         await Promise.all([
@@ -256,6 +277,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
       }
     }
+    state.bots = await bots;
     return reply
       .type('text/html; charset=utf-8')
       .header('cache-control', 'private, no-store')
@@ -454,6 +476,38 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         return reply.code(502).send({ error: 'goldfish_unavailable' });
       }
     });
+
+  // A chat linked to a bot, unlinked from the agents page (only the owner's own chats).
+  app.post('/api/bots/unlink', async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden' });
+    const user = await sessions.user(req);
+    if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
+    if (!s.bots) return reply.code(404).send({ error: 'not_found' });
+    const body = (req.body ?? {}) as { channel?: unknown; chatId?: unknown };
+    if (
+      typeof body.channel !== 'string' ||
+      typeof body.chatId !== 'string' ||
+      !body.channel ||
+      !body.chatId ||
+      body.channel.length > 40 ||
+      body.chatId.length > 100
+    )
+      return reply.code(400).send({ error: 'bad_request', message: 'какой чат отвязать?' });
+    try {
+      const owner = { clientId: await s.goldfish.clientId(), userId: goldfishUserId(user) };
+      if (!(await s.bots.unlink(owner, body.channel, body.chatId)))
+        return reply.code(404).send({ error: 'not_found', message: 'Этот чат уже отвязан' });
+      req.log.info({ userId: user.id, channel: body.channel }, 'bot chat unlinked');
+      return { ok: true };
+    } catch (err) {
+      req.log.error({ err }, 'bots unlink: bots server unavailable');
+      return reply.code(502).send({
+        error: 'bots_unavailable',
+        message: 'Сервер ботов сейчас недоступен — попробуйте через минуту',
+      });
+    }
+  });
 
   app.setNotFoundHandler(async (_req, reply) =>
     reply.code(404).type('text/html; charset=utf-8').send(renderNotFound(view)),
