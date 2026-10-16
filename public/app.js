@@ -584,98 +584,6 @@ document.addEventListener('submit', (event) => {
   );
 });
 
-// ------------------------------------------------ the manager in messengers: QR codes
-
-const messengers = document.querySelector('[data-messengers]');
-let linkTimer = 0;
-
-/** While the QR codes are on screen: as soon as the bot links a chat, the page says so. */
-function waitForLink(known, until) {
-  clearInterval(linkTimer);
-  linkTimer = setInterval(async () => {
-    if (Date.now() > Date.parse(until)) return clearInterval(linkTimer);
-    try {
-      const res = await fetch('/api/agents/messengers', { credentials: 'same-origin' });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.links.length > known) {
-        clearInterval(linkTimer);
-        const fresh = data.links.reduce((a, b) => (a.linkedAt > b.linkedAt ? a : b));
-        reloadWith(
-          `Готово: ${fresh.title} привязан. Управляющий пришлёт туда сводку, срочное и согласования.`,
-        );
-      }
-    } catch {
-      // Asked again in a few seconds.
-    }
-  }, 4000);
-}
-
-if (messengers) {
-  const grid = messengers.querySelector('[data-qr]');
-  const hint = messengers.querySelector('[data-qr-hint]');
-  messengers.addEventListener(
-    'click',
-    guarded(async (event) => {
-      const codes = event.target.closest('[data-act="messenger-codes"]');
-      const unlink = event.target.closest('[data-act="messenger-unlink"]');
-      if (codes) {
-        codes.disabled = true;
-        const data = await agentsCall('POST', '/api/agents/messengers/codes');
-        grid.textContent = '';
-        for (const o of data.offers) {
-          const fig = document.createElement('figure');
-          fig.className = `qr qr--${o.channel}`;
-          const img = document.createElement('img');
-          img.src = o.qr;
-          img.alt = `QR-код ${o.title}`;
-          img.width = 180;
-          img.height = 180;
-          const cap = document.createElement('figcaption');
-          const title = document.createElement('b');
-          title.textContent = o.title;
-          const open = document.createElement('a');
-          open.href = o.url;
-          open.target = '_blank';
-          open.rel = 'noopener';
-          open.textContent = 'Открыть здесь';
-          const code = document.createElement('span');
-          code.className = 'hint';
-          code.textContent = `или отправьте боту код ${o.code}`;
-          cap.append(title, open, code);
-          fig.append(img, cap);
-          grid.append(fig);
-        }
-        const until = new Date(data.expiresAt).toLocaleTimeString('ru-RU', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-        hint.textContent = data.offers.length
-          ? `Наведите камеру телефона на код нужного мессенджера — откроется чат с ботом, и он привяжется сам. Коды одноразовые, действуют до ${until}. Привязать можно и чат администратора.`
-          : 'Боты ещё не подключены ни к одному мессенджеру.';
-        grid.hidden = !data.offers.length;
-        hint.hidden = false;
-        codes.disabled = false;
-        codes.textContent = 'Новые QR-коды';
-        waitForLink(
-          messengers.querySelectorAll('[data-act="messenger-unlink"]').length,
-          data.expiresAt,
-        );
-      } else if (unlink) {
-        const title = unlink.getAttribute('data-title');
-        if (!(await askConfirm(`Отвязать ${title}? Сообщения управляющего туда больше не придут.`)))
-          return;
-        unlink.disabled = true;
-        await agentsCall('POST', '/api/agents/messengers/unlink', {
-          channel: unlink.getAttribute('data-channel'),
-          chatId: unlink.getAttribute('data-chat'),
-        });
-        reloadWith(`${title}: чат отвязан.`);
-      }
-    }),
-  );
-}
-
 const telegramButton = document.querySelector('[data-act="telegram"]');
 if (telegramButton) {
   telegramButton.addEventListener(
@@ -698,6 +606,23 @@ if (telegramButton) {
     }),
   );
 }
+
+// A chat linked to a bot in Telegram, MAX or WhatsApp: unlinked through the site.
+document.querySelectorAll('[data-act="bot-unlink"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      if (!(await askConfirm('Отвязать этот чат? Сообщения управляющего туда больше не придут.')))
+        return;
+      button.disabled = true;
+      await agentsCall('POST', '/api/bots/unlink', {
+        channel: button.getAttribute('data-channel'),
+        chatId: button.getAttribute('data-chat'),
+      });
+      reloadWith('Чат отвязан.');
+    }),
+  ),
+);
 
 const hookButton = document.querySelector('[data-act="hook-token"]');
 if (hookButton) {

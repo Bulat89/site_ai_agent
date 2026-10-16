@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { signIn, startApp, type TestApp } from './helpers.js';
+import { BOTS_TOKEN, BOTS_URL, signIn, startApp, type TestApp } from './helpers.js';
 
 let t: TestApp;
 afterEach(async () => {
@@ -24,7 +24,7 @@ describe('user guide', () => {
       'Агенты и права',
       'Задания агентам',
       'Согласования',
-      'Управляющий в мессенджере',
+      'Управляющий, Telegram, MAX и WhatsApp',
       'Сообщения гостей',
       'Показатели',
       'Если что-то не так',
@@ -37,7 +37,8 @@ describe('user guide', () => {
   });
 
   it('every link into the guide and from it to the agents page lands on an existing anchor', async () => {
-    t = await startApp();
+    // With the bots server: the cabinet has its QR codes (#bots) the guide links to.
+    t = await startApp({ BOTS_URL, BOTS_API_TOKEN: BOTS_TOKEN });
     const cookies = await signIn(t);
     const help = (await t.app.inject({ url: '/help', cookies })).body;
     const agents = (await t.app.inject({ url: '/agents', cookies })).body;

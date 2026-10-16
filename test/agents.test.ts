@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { esc } from '../src/pages/page.js';
-import { PUBLIC_URL, signIn, startApp, type TestApp } from './helpers.js';
+import { BOTS_TOKEN, BOTS_URL, PUBLIC_URL, signIn, startApp, type TestApp } from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
 
@@ -140,6 +140,23 @@ describe('agents page', () => {
     ];
     html = (await t.app.inject({ url: '/api/agents/today', cookies })).json().count;
     expect(html).toContain('tabs__count--urgent');
+  });
+
+  it('the live «Сегодня» reads the linked chats without making new link codes', async () => {
+    t = await startApp({ BOTS_URL, BOTS_API_TOKEN: BOTS_TOKEN });
+    const cookies = await signIn(t);
+    t.fakes.botLinks.push({
+      owner: 'cl_1/yandex:1000001',
+      channel: 'telegram',
+      title: 'Telegram',
+      chatId: '501',
+      name: 'Иван',
+      linkedAt: '2026-10-16T10:00:00.000Z',
+    });
+    const live = (await t.app.inject({ url: '/api/agents/today', cookies })).json();
+    expect(live.strip).toContain('Привязан Telegram');
+    expect(live.today).not.toContain('Первые шаги');
+    expect(t.fakes.botCalls).toEqual(['GET cl_1/yandex:1000001']);
   });
 
   it('a decision on the site is marked as taken on the site', async () => {

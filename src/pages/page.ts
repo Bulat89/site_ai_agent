@@ -1,6 +1,7 @@
 import type { AccessState } from '../access.js';
 import type { AssetUrls } from '../static.js';
 import type { UserRecord } from '../store/types.js';
+import { botsBlock, type BotsState } from './bots.js';
 
 export type Notice = 'login_denied' | 'login_expired' | 'login_error' | 'download_unavailable';
 
@@ -15,6 +16,8 @@ interface PageState extends View {
   user: UserRecord | null;
   access: AccessState | null;
   notice: Notice | null;
+  /** The bots in the messengers: undefined when the site has no bots server (BOTS_URL). */
+  bots?: BotsState | undefined;
 }
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -323,7 +326,21 @@ ${WAVES}
 </section>`;
 }
 
-function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): string {
+/** Step 4 of the cabinet: QR codes that link the owner's Telegram, MAX or WhatsApp. */
+function botsCard(bots: BotsState): string {
+  return `<article class="card card--wide" id="bots" aria-labelledby="bots-title">
+    <div class="card__head"><h2 id="bots-title"><span class="num">4</span>Управляйте агентами из мессенджера</h2>${helpLink('bots', 'Что умеет бот?')}</div>
+    <p>Привяжите Telegram, MAX или WhatsApp: согласовывайте решения агентов, поручайте им задачи, включайте и выключайте агентов прямо из чата. Туда же придут утренняя сводка и срочное.</p>
+    ${botsBlock(bots, { unlink: false, refreshHref: '/#bots', agentsHref: agentsHref('telegram-title') })}
+  </article>`;
+}
+
+function cabinet(
+  user: UserRecord,
+  access: AccessState,
+  goldfishUrl: string,
+  bots?: BotsState,
+): string {
   const first = (user.name ?? user.login ?? '').split(/\s+/)[0] ?? '';
   if (!access.allowed)
     return `<section class="hero hero--user wrap">
@@ -340,7 +357,7 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   <div class="hero__text">
     <p class="eyebrow eyebrow--ok"><span class="dot"></span>${esc(access.label)} · доступ открыт</p>
     <h1>Здравствуйте${first ? `, ${esc(first)}` : ''}!</h1>
-    <p class="lead">Три шага — и команда агентов работает на ваш объект.</p>
+    <p class="lead">${bots ? 'Четыре шага' : 'Три шага'} — и команда агентов работает на ваш объект.</p>
   </div>
 </section>
 <section class="cabinet wrap" aria-label="Установка и подключение">
@@ -373,17 +390,19 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   </article>
   <article class="card card--wide">
     <h2><span class="num">3</span>Настройте агентов объекта</h2>
-    <p>Заполните эталон объекта (можно по ссылке на карточку Авито или Яндекс Путешествий), включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
+    <p>Заполните эталон объекта (можно по ссылке на карточку Авито или Яндекс Путешествий), включите агентов и привяжите ${bots ? 'мессенджер' : 'Telegram'} — управляющий пришлёт сводку и согласования.</p>
     <div class="row">
       <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
       <a class="btn btn--ghost" href="/help">Инструкция по всем сценариям</a>
     </div>
   </article>
+  ${bots ? botsCard(bots) : ''}
 </section>`;
 }
 
 export function renderPage(s: PageState): string {
-  const main = s.user && s.access ? cabinet(s.user, s.access, s.goldfishUrl) + TEAM : guest();
+  const main =
+    s.user && s.access ? cabinet(s.user, s.access, s.goldfishUrl, s.bots) + TEAM : guest();
   return layout(
     s,
     'Goldfish — агенты для гостевого дома и отеля',

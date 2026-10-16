@@ -33,9 +33,10 @@ import {
   type ListingSearchView,
   type CompetitorSearchView,
 } from './pages/agents.js';
-import type { UserRecord } from './store/types.js';
+import type { BotsState } from './pages/bots.js';
 import type { Services } from './services.js';
 import { registerStatic } from './static.js';
+import type { UserRecord } from './store/types.js';
 
 const NOTICES: Record<string, Notice> = {
   denied: 'login_denied',
@@ -107,16 +108,38 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     }
   });
 
+  /**
+   * The owner's bots in the messengers for a page: fresh one-time codes for the QR codes and the
+   * chats already linked. Undefined without a bots server; a silent one is «unavailable» and the
+   * page renders without the codes.
+   */
+  const botsOf = async (
+    user: UserRecord,
+    req: FastifyRequest,
+    codes = true,
+  ): Promise<BotsState | undefined> => {
+    if (!s.bots) return undefined;
+    try {
+      const owner = { clientId: await s.goldfish.clientId(), userId: goldfishUserId(user) };
+      return await s.bots.view(owner, codes);
+    } catch (err) {
+      req.log.warn({ err }, 'bots server unavailable: the page goes without QR codes');
+      return 'unavailable';
+    }
+  };
+
   app.get('/', async (req, reply) => {
     const user = await sessions.user(req);
     const q = req.query as { login?: string; download?: string };
     const notice: Notice | null =
       (q.login && NOTICES[q.login]) ||
       (q.download === 'unavailable' ? 'download_unavailable' : null);
+    const access = user ? accessOf(user) : null;
+    const bots = user && access?.allowed ? await botsOf(user, req) : undefined;
     return reply
       .type('text/html; charset=utf-8')
       .header('cache-control', 'private, no-store')
-      .send(renderPage({ ...view, user, access: user ? accessOf(user) : null, notice }));
+      .send(renderPage({ ...view, user, access, notice, bots }));
   });
 
   // The guide is public: it also answers «how does it work» before signing in.
@@ -236,22 +259,6 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     );
   };
 
-  /** The owner's chats on the bots server; the bots being down does not stop the page. */
-  const loadMessengers = async (
-    req: FastifyRequest,
-    user: UserRecord,
-  ): Promise<Pick<AgentsState, 'messengers' | 'messengersError'>> => {
-    if (!s.bots) return { messengers: null };
-    try {
-      return {
-        messengers: await s.bots.messengers(await s.goldfish.clientId(), goldfishUserId(user)),
-      };
-    } catch (err) {
-      req.log.warn({ err }, 'agents page: bots server unavailable');
-      return { messengers: null, messengersError: true };
-    }
-  };
-
   const EMPTY_DESK: DeskView = {
     rev: '',
     status: { agentsOn: 0, agentsTotal: 0, wave: 1, pending: 0, urgent: 0 },
@@ -275,20 +282,18 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
       desk: EMPTY_DESK,
       error: null,
     };
+    const bots = botsOf(user, req);
     try {
-      const [hotel, desk, profileImport, listings, competitorSearch, messengers] =
-        await Promise.all([
-          s.goldfish.hotel<HotelView>(gf, 'GET', ''),
-          s.goldfish.hotel<DeskView>(gf, 'GET', '/manager'),
-          s.goldfish.hotel<ProfileImportView | null>(gf, 'GET', '/profile/import'),
-          s.goldfish.hotel<ListingSearchView | null>(gf, 'GET', '/listings'),
-          s.goldfish.hotel<CompetitorSearchView | null>(gf, 'GET', '/competitors'),
-          loadMessengers(req, user),
-        ]);
+      const [hotel, desk, profileImport, listings, competitorSearch] = await Promise.all([
+        s.goldfish.hotel<HotelView>(gf, 'GET', ''),
+        s.goldfish.hotel<DeskView>(gf, 'GET', '/manager'),
+        s.goldfish.hotel<ProfileImportView | null>(gf, 'GET', '/profile/import'),
+        s.goldfish.hotel<ListingSearchView | null>(gf, 'GET', '/listings'),
+        s.goldfish.hotel<CompetitorSearchView | null>(gf, 'GET', '/competitors'),
+      ]);
       if (hotel.status !== 200) throw new Error(`hotel: ${hotel.status}`);
       state = {
         ...state,
-        ...messengers,
         hotel: hotel.body,
         desk: await loadDesk(gf, hotel.body, desk),
         profileImport: profileImport.status === 200 ? profileImport.body : null,
@@ -307,6 +312,7 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         state.error = 'Сервер агентов сейчас недоступен — попробуйте через минуту.';
       }
     }
+    state.bots = await bots;
     return reply
       .type('text/html; charset=utf-8')
       .header('cache-control', 'private, no-store')
@@ -423,13 +429,14 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     if (!accessOf(user).allowed) return reply.code(403).send({ error: 'no_access' });
     const gf = goldfishUserId(user);
     try {
-      const [hotel, desk, messengers] = await Promise.all([
+      // The chats linked, without fresh link codes: those are made only for the QR codes.
+      const [hotel, desk, bots] = await Promise.all([
         s.goldfish.hotel<HotelView>(gf, 'GET', ''),
         s.goldfish.hotel<DeskView>(gf, 'GET', '/manager'),
-        loadMessengers(req, user),
+        botsOf(user, req, false),
       ]);
       if (hotel.status !== 200) throw new Error(`hotel: ${hotel.status}`);
-      const st = { hotel: hotel.body, desk: await loadDesk(gf, hotel.body, desk), ...messengers };
+      const st = { hotel: hotel.body, desk: await loadDesk(gf, hotel.body, desk), bots };
       return {
         rev: st.desk.rev,
         pending: st.desk.status.pending,
@@ -447,58 +454,6 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
     }
   });
 
-  /** QR codes that link Telegram, MAX or WhatsApp to the manager (the bots server). */
-  const botsCall =
-    <T>(work: (req: FastifyRequest, clientId: string, userId: string) => Promise<T>) =>
-    async (req: FastifyRequest, reply: import('fastify').FastifyReply) => {
-      reply.header('cache-control', 'no-store');
-      if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden' });
-      const user = await sessions.user(req);
-      if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
-      const access = accessOf(user);
-      if (!access.allowed)
-        return reply.code(403).send({ error: 'no_access', message: access.reason });
-      if (!s.bots)
-        return reply
-          .code(404)
-          .send({ error: 'not_found', message: 'Боты в мессенджерах не настроены' });
-      try {
-        return await work(req, await s.goldfish.clientId(), goldfishUserId(user));
-      } catch (err) {
-        req.log.error({ err }, 'messengers: bots server unavailable');
-        return reply.code(502).send({
-          error: 'bots_unavailable',
-          message: 'Сервер ботов сейчас недоступен — попробуйте через минуту',
-        });
-      }
-    };
-  app.post(
-    '/api/agents/messengers/codes',
-    botsCall((_req, clientId, userId) => s.bots!.codes(clientId, userId)),
-  );
-  // Polled while the QR codes are on screen: the page says «привязан» as soon as the bot links.
-  app.get('/api/agents/messengers', async (req, reply) => {
-    reply.header('cache-control', 'no-store');
-    const user = await sessions.user(req);
-    if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
-    if (!accessOf(user).allowed) return reply.code(403).send({ error: 'no_access' });
-    if (!s.bots) return reply.code(404).send({ error: 'not_found' });
-    try {
-      return await s.bots.messengers(await s.goldfish.clientId(), goldfishUserId(user));
-    } catch (err) {
-      req.log.warn({ err }, 'messengers: bots server unavailable');
-      return reply.code(502).send({ error: 'bots_unavailable' });
-    }
-  });
-  app.post(
-    '/api/agents/messengers/unlink',
-    botsCall(async (req, clientId, userId) => {
-      const body = (req.body ?? {}) as { channel?: unknown; chatId?: unknown };
-      if (typeof body.channel !== 'string' || typeof body.chatId !== 'string')
-        return { unlinked: false };
-      return { unlinked: await s.bots!.unlink(clientId, userId, body.channel, body.chatId) };
-    }),
-  );
   app.post(
     '/api/agents/hook-token',
     proxy('POST', () => '/hook-token'),
@@ -605,6 +560,38 @@ export async function buildApp(s: Services): Promise<FastifyInstance> {
         return reply.code(502).send({ error: 'goldfish_unavailable' });
       }
     });
+
+  // A chat linked to a bot, unlinked from the agents page (only the owner's own chats).
+  app.post('/api/bots/unlink', async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    if (!sameOrigin(req)) return reply.code(403).send({ error: 'forbidden' });
+    const user = await sessions.user(req);
+    if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'Войдите заново' });
+    if (!s.bots) return reply.code(404).send({ error: 'not_found' });
+    const body = (req.body ?? {}) as { channel?: unknown; chatId?: unknown };
+    if (
+      typeof body.channel !== 'string' ||
+      typeof body.chatId !== 'string' ||
+      !body.channel ||
+      !body.chatId ||
+      body.channel.length > 40 ||
+      body.chatId.length > 100
+    )
+      return reply.code(400).send({ error: 'bad_request', message: 'какой чат отвязать?' });
+    try {
+      const owner = { clientId: await s.goldfish.clientId(), userId: goldfishUserId(user) };
+      if (!(await s.bots.unlink(owner, body.channel, body.chatId)))
+        return reply.code(404).send({ error: 'not_found', message: 'Этот чат уже отвязан' });
+      req.log.info({ userId: user.id, channel: body.channel }, 'bot chat unlinked');
+      return { ok: true };
+    } catch (err) {
+      req.log.error({ err }, 'bots unlink: bots server unavailable');
+      return reply.code(502).send({
+        error: 'bots_unavailable',
+        message: 'Сервер ботов сейчас недоступен — попробуйте через минуту',
+      });
+    }
+  });
 
   app.setNotFoundHandler(async (_req, reply) =>
     reply.code(404).type('text/html; charset=utf-8').send(renderNotFound(view)),

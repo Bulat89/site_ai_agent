@@ -1,8 +1,13 @@
-import QRCode from 'qrcode';
 import type { Config } from './config.js';
 
-/** A chat of the owner linked to the bots (Telegram, MAX, WhatsApp). */
-export interface MessengerLink {
+/** A Goldfish user on whose behalf the bots act. */
+export interface BotOwner {
+  clientId: string;
+  userId: string;
+}
+
+/** A chat of the owner linked to a bot. */
+export interface BotLink {
   channel: string;
   title: string;
   chatId: string;
@@ -10,20 +15,19 @@ export interface MessengerLink {
   linkedAt: string;
 }
 
-/** The messengers the bots server works in and the owner's chats there. */
-export interface MessengersView {
-  channels: Array<{ id: string; title: string }>;
-  links: MessengerLink[];
-}
-
-/** A one-time code for one messenger: the link the QR code opens. */
-export interface LinkOffer {
+/** A one-time code for a QR code: the link opens the bot in its messenger and hands it the code. */
+export interface BotOffer {
   channel: string;
   title: string;
   url: string;
   code: string;
-  /** The QR code of `url` as a data: image (the page's CSP allows data: images only). */
-  qr: string;
+}
+
+export interface BotsView {
+  channels: Array<{ id: string; title: string }>;
+  links: BotLink[];
+  offers: BotOffer[];
+  expiresAt: string | null;
 }
 
 export class BotsError extends Error {
@@ -36,25 +40,26 @@ export class BotsError extends Error {
   }
 }
 
-const TIMEOUT_MS = 10_000;
+/** The cabinet waits for the bots server this long at most: the page renders without the QR codes. */
+const TIMEOUT_MS = 5_000;
 const enc = encodeURIComponent;
 
 /**
- * Client of the bots server (repository tg_goldfish): the cabinet shows QR codes that link the
- * owner's Telegram, MAX or WhatsApp to the manager agent, and the chats already linked.
+ * Client of the bots server (repository tg_goldfish): link codes for the QR codes of the cabinet,
+ * the chats already linked, unlinking a chat.
  */
 export class BotsClient {
   constructor(
-    private readonly config: { url: string; token: string },
+    private readonly config: { BOTS_URL: string; BOTS_API_TOKEN: string },
     private readonly fetchFn: typeof fetch = fetch,
   ) {}
 
   private async call<T>(method: string, path: string): Promise<{ status: number; body: T }> {
     let res: Response;
     try {
-      res = await this.fetchFn(new URL(path, this.config.url), {
+      res = await this.fetchFn(new URL(path, this.config.BOTS_URL), {
         method,
-        headers: { authorization: `Bearer ${this.config.token}` },
+        headers: { authorization: `Bearer ${this.config.BOTS_API_TOKEN}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (err) {
@@ -66,49 +71,43 @@ export class BotsClient {
     return { status: res.status, body: (text ? JSON.parse(text) : {}) as T };
   }
 
-  private owner(clientId: string, userId: string): string {
-    return `/api/owners/${enc(clientId)}/${enc(userId)}`;
+  private path(o: BotOwner): string {
+    return `/api/owners/${enc(o.clientId)}/${enc(o.userId)}`;
   }
 
-  async messengers(clientId: string, userId: string): Promise<MessengersView> {
-    const r = await this.call<MessengersView>('GET', this.owner(clientId, userId));
-    if (r.status !== 200) throw new BotsError(`owner: ${r.status}`, r.status);
-    return r.body;
+  /** The messengers, the owner's linked chats and, with `codes`, fresh codes for the QR codes. */
+  async view(o: BotOwner, codes: boolean): Promise<BotsView> {
+    const [state, offers] = await Promise.all([
+      this.call<{ channels: BotsView['channels']; links: BotLink[] }>('GET', this.path(o)),
+      codes
+        ? this.call<{ expiresAt: string; offers: BotOffer[] }>('POST', `${this.path(o)}/codes`)
+        : Promise.resolve(null),
+    ]);
+    if (state.status !== 200) throw new BotsError(`owner: ${state.status}`, state.status);
+    if (offers && offers.status !== 201)
+      throw new BotsError(`codes: ${offers.status}`, offers.status);
+    return {
+      channels: state.body.channels,
+      links: state.body.links,
+      offers: offers?.body.offers ?? [],
+      expiresAt: offers?.body.expiresAt ?? null,
+    };
   }
 
-  /** Fresh one-time codes, one per messenger, with their QR codes. */
-  async codes(
-    clientId: string,
-    userId: string,
-  ): Promise<{ expiresAt: string; offers: LinkOffer[] }> {
-    const r = await this.call<{ expiresAt: string; offers: Array<Omit<LinkOffer, 'qr'>> }>(
-      'POST',
-      `${this.owner(clientId, userId)}/codes`,
-    );
-    if (r.status !== 201) throw new BotsError(`codes: ${r.status}`, r.status);
-    const offers = await Promise.all(
-      r.body.offers.map(async (o) => ({
-        ...o,
-        qr: await QRCode.toDataURL(o.url, { margin: 1, width: 240, errorCorrectionLevel: 'M' }),
-      })),
-    );
-    return { expiresAt: r.body.expiresAt, offers };
-  }
-
-  /** false — no such chat of this owner. */
-  async unlink(clientId: string, userId: string, channel: string, chatId: string) {
-    const r = await this.call(
-      'DELETE',
-      `${this.owner(clientId, userId)}/links/${enc(channel)}/${enc(chatId)}`,
-    );
+  /** False when there is no such chat of the owner. */
+  async unlink(o: BotOwner, channel: string, chatId: string): Promise<boolean> {
+    const r = await this.call('DELETE', `${this.path(o)}/links/${enc(channel)}/${enc(chatId)}`);
     return r.status === 204;
   }
 }
 
-export function botsClient(
+export function createBots(
   config: Pick<Config, 'BOTS_URL' | 'BOTS_API_TOKEN'>,
   fetchFn?: typeof fetch,
 ): BotsClient | null {
   if (!config.BOTS_URL || !config.BOTS_API_TOKEN) return null;
-  return new BotsClient({ url: config.BOTS_URL, token: config.BOTS_API_TOKEN }, fetchFn);
+  return new BotsClient(
+    { BOTS_URL: config.BOTS_URL, BOTS_API_TOKEN: config.BOTS_API_TOKEN },
+    fetchFn,
+  );
 }

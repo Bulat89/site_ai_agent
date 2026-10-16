@@ -1226,104 +1226,6 @@ h1 {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
 }
 
-/* The manager in messengers: linked chats and QR codes. */
-.messengers {
-  margin-bottom: 20px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: var(--warn-soft);
-}
-.messengers--on {
-  background: var(--ok-soft);
-}
-.messengers > p {
-  margin: 0 0 12px;
-}
-.messengers__links {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.messengers__links li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--surface);
-}
-.messengers__who {
-  flex: 1;
-  min-width: 0;
-}
-.messenger {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
-  background: var(--muted);
-}
-.messenger--telegram {
-  background: #229ed9;
-}
-.messenger--max {
-  background: #6d4aff;
-}
-.messenger--whatsapp {
-  background: #1fa855;
-}
-.qr-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-.qr-grid[hidden] {
-  display: none;
-}
-.qr {
-  margin: 0;
-  padding: 14px;
-  border-radius: 14px;
-  background: #fff;
-  border: 1px solid var(--line);
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  text-align: center;
-  color: #1b1d22;
-}
-.qr img {
-  width: 180px;
-  height: 180px;
-  image-rendering: pixelated;
-}
-.qr figcaption {
-  display: grid;
-  gap: 4px;
-}
-.qr .hint {
-  color: #5f6573;
-  font-size: 12px;
-}
-.qr--telegram {
-  box-shadow: inset 0 4px #229ed9;
-}
-.qr--max {
-  box-shadow: inset 0 4px #6d4aff;
-}
-.qr--whatsapp {
-  box-shadow: inset 0 4px #1fa855;
-}
-.messengers [data-qr-hint] {
-  margin: 12px 0 0;
-}
-
 /* ---------------------------------------------------------------- agents: «Команда» */
 
 .waves {
@@ -2747,4 +2649,81 @@ h1 {
 .listing-manual select {
   flex: 0 1 35%;
   min-width: 0;
+}
+
+/* ---------------------------------------------------------------- bots in the messengers */
+
+.bots {
+  margin-bottom: 20px;
+}
+.bots__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 16px 0 12px;
+}
+.bot-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: center;
+}
+/* The code stays dark on white in both themes: scanners read it so. */
+.bot-qr__code {
+  display: block;
+  width: 168px;
+  height: 168px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.bot-qr__code--empty {
+  display: grid;
+  place-items: center;
+  color: #5f6573;
+  font-size: 40px;
+}
+.qr {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.bot-qr__caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bot-qr__state {
+  color: var(--muted);
+  font-size: 14px;
+}
+.bot-qr__state--on {
+  color: var(--ok);
+}
+.bot-qr__caption .hint {
+  margin: 0;
+}
+.bot-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.bot-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--ok-soft);
 }

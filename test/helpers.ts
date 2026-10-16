@@ -11,7 +11,7 @@ export const PUBLIC_URL = 'https://site.test';
 export const GOLDFISH_URL = 'https://agent.test';
 export const ADMIN_TOKEN = 'admin-token-0123456789';
 export const BOTS_URL = 'https://bots.test';
-export const BOTS_TOKEN = 'bots-token-0123456789-0123456789-ab';
+export const BOTS_TOKEN = 'bots-token-0123456789-0123456789-abcdef';
 
 export function testConfig(env: Record<string, string> = {}): Config {
   return loadConfig({
@@ -389,16 +389,18 @@ export class Fakes {
   /** Decisions taken, for «Решено недавно». */
   decided: Array<Record<string, unknown>> = [];
   deskRev = 'rev_1';
-  // Bots server
-  botsDown = false;
-  readonly botsCalls: string[] = [];
-  messengerLinks: Array<{
+  // Bots server (tg_goldfish)
+  /** Chats linked to bots: `owner` is `<clientId>/<userId>`. */
+  readonly botLinks: Array<{
+    owner: string;
     channel: string;
     title: string;
     chatId: string;
     name: string | null;
     linkedAt: string;
   }> = [];
+  botsDown = false;
+  readonly botCalls: string[] = [];
   extensionZip: Buffer | null = Buffer.from('PK\u0003\u0004fake-zip');
   readonly calls: string[] = [];
   private seq = 0;
@@ -469,51 +471,58 @@ export class Fakes {
 
   private bots(method: string, url: URL, headers: Headers): Response {
     if (this.botsDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
-    this.botsCalls.push(`${method} ${url.pathname}`);
     if (headers.get('authorization') !== `Bearer ${BOTS_TOKEN}`)
       return json({ error: 'unauthorized' }, 401);
-    const m = /^\/api\/owners\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
+    const m = /^\/api\/owners\/([^/]+)\/([^/]+)(\/codes|\/links\/([^/]+)\/([^/]+))?$/.exec(
+      url.pathname,
+    );
     if (!m) return json({ error: 'not_found' }, 404);
-    const sub = m[3] ?? '';
-    if (method === 'GET' && sub === '')
+    const owner = `${decodeURIComponent(m[1]!)}/${decodeURIComponent(m[2]!)}`;
+    this.botCalls.push(`${method} ${owner}${m[3] ? m[3].replace(/\/links.*/, '/links') : ''}`);
+    const channels = [
+      { id: 'telegram', title: 'Telegram' },
+      { id: 'max', title: 'MAX' },
+      { id: 'whatsapp', title: 'WhatsApp' },
+    ];
+    if (method === 'GET' && !m[3])
       return json({
-        channels: [
-          { id: 'telegram', title: 'Telegram' },
-          { id: 'max', title: 'MAX' },
-          { id: 'whatsapp', title: 'WhatsApp' },
-        ],
-        links: this.messengerLinks,
+        channels,
+        links: this.botLinks.filter((l) => l.owner === owner).map(({ owner: _o, ...l }) => l),
       });
-    if (method === 'POST' && sub === '/codes')
+    if (method === 'POST' && m[3] === '/codes')
       return json(
         {
-          expiresAt: '2026-10-16T22:00:00.000Z',
+          expiresAt: '2026-10-16T18:40:00.000Z',
           offers: [
             {
               channel: 'telegram',
               title: 'Telegram',
-              url: 'https://t.me/goldfish_bot?start=K7Q2M9XZ',
-              code: 'K7Q2M9XZ',
+              url: 'https://t.me/goldfish_bot?start=TGCODE23',
+              code: 'TGCODE23',
+            },
+            {
+              channel: 'max',
+              title: 'MAX',
+              url: 'https://max.ru/goldfish_bot?start=MAXCODE2',
+              code: 'MAXCODE2',
             },
             {
               channel: 'whatsapp',
               title: 'WhatsApp',
-              url: 'https://wa.me/79990001122?text=Код%20Goldfish%3A%20W3R5T8YU',
-              code: 'W3R5T8YU',
+              url: 'https://wa.me/79000000001?text=%D0%9A%D0%BE%D0%B4%20Goldfish%3A%20WACODE23',
+              code: 'WACODE23',
             },
           ],
         },
         201,
       );
-    const unlink = /^\/links\/([^/]+)\/([^/]+)$/.exec(sub);
-    if (method === 'DELETE' && unlink) {
-      const before = this.messengerLinks.length;
-      this.messengerLinks = this.messengerLinks.filter(
-        (l) => !(l.channel === unlink[1] && l.chatId === decodeURIComponent(unlink[2]!)),
+    if (method === 'DELETE' && m[4]) {
+      const i = this.botLinks.findIndex(
+        (l) => l.owner === owner && l.channel === m[4] && l.chatId === decodeURIComponent(m[5]!),
       );
-      return before === this.messengerLinks.length
-        ? json({ error: 'not_found' }, 404)
-        : new Response(null, { status: 204 });
+      if (i < 0) return json({ error: 'not_found' }, 404);
+      this.botLinks.splice(i, 1);
+      return new Response(null, { status: 204 });
     }
     return json({ error: 'not_found' }, 404);
   }

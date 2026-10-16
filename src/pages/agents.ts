@@ -1,5 +1,5 @@
-import type { MessengersView } from '../bots.js';
 import type { UserRecord } from '../store/types.js';
+import { botsBlock, type BotsState } from './bots.js';
 import {
   AGENT_TABS,
   ICONS,
@@ -147,18 +147,15 @@ export interface AgentsState extends View {
   user: UserRecord;
   hotel: HotelView | null;
   desk: DeskView;
-  /**
-   * The owner's messengers on the bots server; null — the bots are not configured (the Goldfish
-   * server's own Telegram bot) or did not answer (`messengersError`).
-   */
-  messengers?: MessengersView | null;
-  messengersError?: boolean;
+
   /** The tab the page opens on (`?tab=`); «Сегодня» by default. */
   tab?: AgentTab;
   /** The latest draft of the reference from a card, while it is read or waits for the owner. */
   profileImport?: ProfileImportView | null;
   listings?: ListingSearchView | null;
   competitorSearch?: CompetitorSearchView | null;
+  /** The bots in the messengers: undefined when the site has no bots server (BOTS_URL). */
+  bots?: BotsState | undefined;
   error: string | null;
 }
 
@@ -343,21 +340,9 @@ const duties = (n: number) => {
 
 // ---------------------------------------------------------------- the top of the page
 
-/** The messengers the manager writes to, for the state line and «Первые шаги». */
-function messengerState(
-  s: Pick<AgentsState, 'hotel' | 'messengers'>,
-): { linked: boolean; label: string } | null {
-  if (s.messengers) {
-    const titles = [...new Set(s.messengers.links.map((l) => l.title))];
-    return titles.length
-      ? { linked: true, label: `Мессенджеры: ${titles.join(', ')}` }
-      : { linked: false, label: 'Мессенджер не привязан' };
-  }
-  const h = s.hotel;
-  if (!h || h.telegramBot === false) return null;
-  return h.telegramLinked
-    ? { linked: true, label: 'Telegram привязан' }
-    : { linked: false, label: 'Telegram не привязан' };
+/** Whether a chat gets the manager's messages: a bot of the bots server or the Telegram of Goldfish. */
+function messengerLinked(h: HotelView, bots: BotsState | undefined): boolean {
+  return h.telegramLinked || (!!bots && bots !== 'unavailable' && bots.links.length > 0);
 }
 
 /**
@@ -365,8 +350,9 @@ function messengerState(
  * where the manager writes — each a link to the place where it is changed. The same line is in
  * the side panel of the extension and in the bots' menu.
  */
-export function statusStrip(s: Pick<AgentsState, 'hotel' | 'desk' | 'messengers'>): string {
+export function statusStrip(s: Pick<AgentsState, 'hotel' | 'desk' | 'bots'>): string {
   const h = s.hotel!;
+  const bots = s.bots;
   const set = h.settings;
   const { status } = s.desk;
   const on = set.agents.filter((a) => a.enabled).length;
@@ -388,10 +374,18 @@ export function statusStrip(s: Pick<AgentsState, 'hotel' | 'desk' | 'messengers'
       ? `<a class="status ${status.urgent ? 'status--bad' : 'status--accent'}" href="${agentsHref('approvals-title')}">Ждут решения: ${status.pending}</a>`
       : `<a class="status" href="${agentsHref('approvals-title')}">Решений не ждут</a>`,
   );
-  const m = messengerState(s);
-  if (m)
+  if (bots && bots !== 'unavailable') {
+    const linked = [...new Set(bots.links.map((l) => l.title))];
     items.push(
-      `<a class="status${m.linked ? '' : ' status--warn'}" href="${agentsHref('telegram-title')}">${esc(m.label)}</a>`,
+      linked.length
+        ? `<a class="status" href="${agentsHref('telegram-title')}">Привязан ${esc(linked.join(', '))}</a>`
+        : `<a class="status status--warn" href="${agentsHref('telegram-title')}">Мессенджер не привязан</a>`,
+    );
+  } else if (h.telegramBot !== false)
+    items.push(
+      h.telegramLinked
+        ? `<a class="status" href="${agentsHref('telegram-title')}">Telegram привязан</a>`
+        : `<a class="status status--warn" href="${agentsHref('telegram-title')}">Telegram не привязан</a>`,
     );
   return `<ul class="statuses" aria-label="Состояние" data-statuses>${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
 }
@@ -524,9 +518,9 @@ function kpiTiles(tiles: DeskView['kpi']): string {
  * «Первые шаги»: what is left before the agents can work, each with a link to the place to do
  * it and to the guide. Hidden once everything is done.
  */
-function firstSteps(s: Pick<AgentsState, 'hotel' | 'messengers'>): string {
+function firstSteps(s: Pick<AgentsState, 'hotel' | 'bots'>): string {
   const h = s.hotel!;
-  const m = messengerState(s);
+  const bots = s.bots;
   const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
   const steps: Array<{ done: boolean; title: string; anchor: AgentAnchor; help: string }> = [
     {
@@ -547,14 +541,19 @@ function firstSteps(s: Pick<AgentsState, 'hotel' | 'messengers'>): string {
       anchor: 'team-title',
       help: 'agent-on',
     },
-    {
-      done: m?.linked ?? true,
-      title: s.messengers
-        ? 'Привяжите мессенджер — Telegram, MAX или WhatsApp — для сводки и согласований'
-        : 'Привяжите Telegram для сводки и согласований',
-      anchor: 'telegram-title',
-      help: 'tg-link',
-    },
+    bots
+      ? {
+          done: messengerLinked(h, bots),
+          title: 'Привяжите Telegram, MAX или WhatsApp для сводки, согласований и задач',
+          anchor: 'telegram-title',
+          help: 'bots',
+        }
+      : {
+          done: h.telegramLinked,
+          title: 'Привяжите Telegram для сводки и согласований',
+          anchor: 'telegram-title',
+          help: 'tg-link',
+        },
   ];
   const left = steps.filter((x) => !x.done).length;
   if (!left) return '';
@@ -643,7 +642,7 @@ function feedBlock(feed: DeskView['feed']): string {
  * numbers and the manager's messages. app.js asks for it again (GET /api/agents/today) and puts
  * it in place when the desk changed — a decision in a messenger or the extension shows here.
  */
-export function todayPanel(s: Pick<AgentsState, 'hotel' | 'desk' | 'messengers'>): string {
+export function todayPanel(s: Pick<AgentsState, 'hotel' | 'desk' | 'bots'>): string {
   const d = s.desk;
   return `  ${firstSteps(s)}
   <section class="card" aria-labelledby="approvals-title">
@@ -1417,41 +1416,6 @@ function telegramBlock(h: HotelView): string {
 </div>`;
 }
 
-const fullDay = (iso: string) =>
-  new Date(iso).toLocaleDateString('ru-RU', {
-    timeZone: 'Europe/Moscow',
-    day: 'numeric',
-    month: 'long',
-  });
-
-/**
- * The manager in the owner's messengers (the bots server): the chats linked, each can be
- * unlinked, and QR codes to link one more — Telegram, MAX, WhatsApp. A chat of an administrator
- * can be linked too: the manager writes to all of them.
- */
-function messengersBlock(m: MessengersView): string {
-  const channels = m.channels.map((c) => c.title).join(', ');
-  const links = m.links.length
-    ? `<ul class="messengers__links">${m.links
-        .map(
-          (l) =>
-            `<li><span class="messenger messenger--${esc(l.channel)}">${esc(l.title)}</span><span class="messengers__who">${esc(l.name ?? 'чат')}<span class="hint"> · с ${esc(fullDay(l.linkedAt))}</span></span><button class="btn btn--ghost btn--sm" type="button" data-act="messenger-unlink" data-channel="${esc(l.channel)}" data-chat="${esc(l.chatId)}" data-title="${esc(l.title)}">Отвязать</button></li>`,
-        )
-        .join('')}</ul>`
-    : '';
-  return `<div class="messengers${m.links.length ? ' messengers--on' : ''}" data-messengers>
-  <p>${
-    m.links.length
-      ? '<b>Управляющий пишет в мессенджер</b> — сводку, срочное и согласования с кнопками. Там же можно поручить задачу или спросить.'
-      : `<b>Мессенджер не привязан.</b> Отсканируйте QR-код камерой телефона — управляющий будет присылать сводку, срочное и кнопки согласований. Доступны: ${esc(channels)}.`
-  }</p>
-  ${links}
-  <button class="btn ${m.links.length ? 'btn--ghost' : 'btn--accent'} btn--sm" type="button" data-act="messenger-codes">${m.links.length ? 'Привязать ещё один чат' : 'Показать QR-коды'}</button>
-  <div class="qr-grid" data-qr hidden></div>
-  <p class="hint" data-qr-hint hidden></p>
-</div>`;
-}
-
 function hookBlock(goldfishUrl: string): string {
   return `<p class="hint hint--top">Для писем-уведомлений площадок, вебхуков PMS и своего мессенджера: адреса с токеном объекта. Новый токен отзывает старый.</p>
 <button class="btn btn--ghost btn--sm" type="button" data-act="hook-token" data-base="${esc(goldfishUrl)}">Выпустить токен вебхуков</button>
@@ -1526,8 +1490,8 @@ export function renderAgents(s: AgentsState): string {
     ${platformsBlock(h)}
   </section>
   <section class="card" aria-labelledby="telegram-title">
-    <div class="card__head"><h2 id="telegram-title">${s.messengers || s.messengersError ? 'Управляющий в мессенджерах' : 'Управляющий и Telegram'}</h2>${helpLink('tg-quiet', 'Как настроить?')}</div>
-    ${s.messengers ? messengersBlock(s.messengers) : s.messengersError ? '<p class="notice">Сервер ботов сейчас не отвечает — привязать мессенджер можно чуть позже.</p>' : telegramBlock(h)}
+    <div class="card__head"><h2 id="telegram-title">${s.bots ? 'Управляющий и мессенджеры' : 'Управляющий и Telegram'}</h2>${helpLink(s.bots ? 'bots' : 'tg-quiet', 'Как настроить?')}</div>
+    ${s.bots ? `<p class="hint hint--top">Привяжите Telegram, MAX или WhatsApp: туда придут сводка, срочное и согласования, оттуда можно поручать агентам задачи.</p>${botsBlock(s.bots, { unlink: true, refreshHref: agentsHref('telegram-title') })}` : telegramBlock(h)}
     ${ownerForm(h)}
   </section>
   <section class="card" aria-labelledby="hooks-title">
