@@ -1,5 +1,16 @@
 import type { UserRecord } from '../store/types.js';
-import { esc, header, helpLink, layout, type View } from './page.js';
+import {
+  AGENT_TABS,
+  ICONS,
+  agentsHref,
+  esc,
+  header,
+  helpLink,
+  layout,
+  type AgentAnchor,
+  type AgentTab,
+  type View,
+} from './page.js';
 
 /** What the Goldfish server returns about the owner's property (GET …/hotel). */
 export interface HotelView {
@@ -34,6 +45,8 @@ export interface HotelView {
         does: string;
         wave: number;
         run: 'browser' | 'code';
+        /** Changes data on platforms or writes to people (older servers do not send it). */
+        writes?: boolean;
         maxLevel: Level;
         alwaysOn: boolean;
         enabled: boolean;
@@ -45,6 +58,8 @@ export interface HotelView {
 }
 
 type Level = 'self' | 'rule' | 'approval' | 'off';
+type Agent = HotelView['settings']['agents'][number];
+type Duty = Agent['duties'][number];
 
 export interface ApprovalView {
   id: string;
@@ -82,6 +97,8 @@ export interface AgentsState extends View {
   approvals: ApprovalView[];
   kpi: KpiView | null;
   feed: FeedItem[];
+  /** The tab the page opens on (`?tab=`); «Сегодня» by default. */
+  tab?: AgentTab;
   /** The latest draft of the reference from a card, while it is read or waits for the owner. */
   profileImport?: ProfileImportView | null;
   listings?: ListingSearchView | null;
@@ -173,14 +190,37 @@ export interface ProfileImportView {
   fields: Array<{ key: string; label: string; value: string; current: string }>;
 }
 
+const LEVELS: Level[] = ['self', 'rule', 'approval', 'off'];
 const LEVEL_TITLES: Record<Level, string> = {
   self: 'Сам',
   rule: 'Правило',
   approval: 'Согласование',
   off: 'Выкл',
 };
+/** What each right means, in the words of the guide (/help#levels). */
+const LEVEL_HINTS: Record<Level, string> = {
+  self: 'делает сам и сообщает в сводке',
+  rule: 'сам в пределах ваших лимитов, за ними — спрашивает',
+  approval: 'каждое действие ждёт вашего «да»',
+  off: 'ничего не делает',
+};
 const RANK: Record<Level, number> = { off: 0, approval: 1, rule: 2, self: 3 };
-const MODES = { full: 'работа', read: 'только чтение', off: 'выключена' } as const;
+const MODES = { full: 'Работа', read: 'Только чтение', off: 'Выкл' } as const;
+const MODE_HINTS = {
+  full: 'сверяют и меняют',
+  read: 'только сверяют',
+  off: 'пропускают',
+} as const;
+const CATEGORIES: Record<string, string> = {
+  pms: 'PMS и менеджеры каналов',
+  sheet: 'Шахматка',
+  guest: 'Площадки для гостей',
+  b2b: 'Для турагентств',
+  maps: 'Карты',
+  ads: 'Реклама',
+  site: 'Сайт',
+  messenger: 'Мессенджер',
+};
 const FEED_KIND: Record<string, string> = {
   urgent: 'Срочно',
   summary: 'Сводка',
@@ -188,6 +228,26 @@ const FEED_KIND: Record<string, string> = {
   reminder: 'Напоминание',
   notice: 'В сводку',
   answer: 'Ответ',
+};
+/** The launch waves: what agents do in each (/help#waves). */
+const WAVES: Array<{ name: string; text: string }> = [
+  { name: 'Наблюдают', text: 'видеть всё и не терять брони' },
+  { name: 'Советуют', text: 'отвечать и советовать' },
+  { name: 'Действуют', text: 'действовать по правилам' },
+];
+const AGENT_ICONS: Record<string, keyof typeof ICONS> = {
+  channels: 'channels',
+  pricing: 'prices',
+  guests: 'guests',
+  reputation: 'reputation',
+  direct: 'direct',
+  manager: 'manager',
+};
+const TAB_TITLES: Record<AgentTab, string> = {
+  today: 'Сегодня',
+  team: 'Команда',
+  property: 'Объект',
+  settings: 'Настройки',
 };
 
 const attr = (v: unknown) => esc(JSON.stringify(v));
@@ -203,26 +263,108 @@ const when = (iso: string) =>
     hour: '2-digit',
     minute: '2-digit',
   });
+const day = (ymd: string) => {
+  const [y, m, d] = ymd.split('-');
+  return y && m && d ? `${d}.${m}.${y}` : ymd;
+};
+const icon = (agent: string) => ICONS[AGENT_ICONS[agent] ?? 'manager'];
+const dot = (l: Level) => `<span class="lvl lvl--${l}" aria-hidden="true"></span>`;
+/** «1 обязанность», «3 обязанности», «9 обязанностей». */
+const duties = (n: number) => {
+  const tens = n % 100;
+  const ones = n % 10;
+  const word =
+    tens > 10 && tens < 20
+      ? 'обязанностей'
+      : ones === 1
+        ? 'обязанность'
+        : ones >= 2 && ones <= 4
+          ? 'обязанности'
+          : 'обязанностей';
+  return `${n} ${word}`;
+};
+
+// ---------------------------------------------------------------- the top of the page
+
+/**
+ * What the owner sees first on every tab: who works, the wave, a pause, what waits for them and
+ * whether Telegram is linked — each a link to the place where it is changed.
+ */
+function statusStrip(h: HotelView, approvals: ApprovalView[]): string {
+  const set = h.settings;
+  const on = set.agents.filter((a) => a.enabled).length;
+  const items: string[] = [];
+  items.push(
+    on
+      ? `<a class="status status--ok" href="${agentsHref('team-title')}"><span class="status__dot" aria-hidden="true"></span>Работают ${on} из ${set.agents.length} агентов</a>`
+      : `<a class="status status--off" href="${agentsHref('team-title')}"><span class="status__dot" aria-hidden="true"></span>Агенты выключены</a>`,
+  );
+  if (set.pause)
+    items.push(
+      `<a class="status status--warn" href="${agentsHref('launch-title')}">Пауза до ${esc(day(set.pause.until))}${set.pause.reason ? ` · ${esc(set.pause.reason)}` : ''}</a>`,
+    );
+  items.push(
+    `<a class="status" href="${agentsHref('launch-title')}">Волна ${set.wave} из 3 · ${esc(WAVES[set.wave - 1]?.name.toLowerCase() ?? '')}</a>`,
+  );
+  items.push(
+    approvals.length
+      ? `<a class="status status--accent" href="${agentsHref('approvals-title')}">Ждут решения: ${approvals.length}</a>`
+      : `<a class="status" href="${agentsHref('approvals-title')}">Решений не ждут</a>`,
+  );
+  if (h.telegramBot !== false)
+    items.push(
+      h.telegramLinked
+        ? `<a class="status" href="${agentsHref('telegram-title')}">Telegram привязан</a>`
+        : `<a class="status status--warn" href="${agentsHref('telegram-title')}">Telegram не привязан</a>`,
+    );
+  return `<ul class="statuses" aria-label="Состояние">${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+}
+
+function tabsNav(active: AgentTab, approvals: number): string {
+  return `<nav class="tabs" aria-label="Разделы агентов">
+${AGENT_TABS.map(
+  (t) =>
+    `  <a class="tabs__tab" href="?tab=${t}" data-tab="${t}"${t === active ? ' aria-current="page"' : ''}>${TAB_TITLES[t]}${t === 'today' && approvals ? ` <span class="tabs__count" aria-label="ждут решения: ${approvals}">${approvals}</span>` : ''}</a>`,
+).join('\n')}
+</nav>`;
+}
+
+function panel(tab: AgentTab, active: AgentTab, body: string): string {
+  return `<div class="tab-panel" id="tab-${tab}" data-panel="${tab}" role="region" aria-label="${TAB_TITLES[tab]}"${tab === active ? '' : ' hidden'}>
+${body}
+</div>`;
+}
+
+// ---------------------------------------------------------------- «Сегодня»
 
 function kpiTiles(k: KpiView | null): string {
   if (!k) return '';
-  if (!k.units)
-    return `<p class="notice">Добавьте в эталон категории номеров и их количество — тогда управляющий посчитает загрузку, ADR и RevPAR.</p>`;
-  const tiles: Array<[string, string]> = [
-    ['Загрузка на 30 дней вперёд', pct(k.next30.occupancy)],
-    ['Загрузка за 30 дней', pct(k.past30.occupancy)],
-    ['ADR за 30 дней', rub(k.past30.adr)],
-    ['RevPAR за 30 дней', rub(k.past30.revpar)],
-    ['Доля прямых броней', pct(k.past30.directShare)],
-    ['Рейтинг', k.rating === null ? '—' : String(k.rating).replace('.', ',')],
-    ['Первый ответ гостю', k.responseMinutes === null ? '—' : `${k.responseMinutes} мин`],
-  ];
-  return `<div class="tiles">${tiles
-    .map(
-      ([t, v]) =>
-        `<div class="tile"><span class="tile__label">${esc(t)}</span><b>${esc(v)}</b></div>`,
-    )
-    .join('')}</div>`;
+  const body = !k.units
+    ? `<p class="notice">Добавьте в эталон номера и их количество — тогда управляющий посчитает загрузку, ADR и RevPAR. <a href="${agentsHref('profile-title')}">Открыть эталон</a></p>`
+    : `<div class="tiles">${(
+        [
+          ['Загрузка вперёд', pct(k.next30.occupancy), 'на 30 дней'],
+          ['Загрузка', pct(k.past30.occupancy), 'за 30 дней'],
+          ['ADR', rub(k.past30.adr), 'средняя цена ночи'],
+          ['RevPAR', rub(k.past30.revpar), 'выручка на номер'],
+          ['Прямые брони', pct(k.past30.directShare), 'доля за 30 дней'],
+          ['Рейтинг', k.rating === null ? '—' : String(k.rating).replace('.', ','), 'на площадках'],
+          [
+            'Первый ответ',
+            k.responseMinutes === null ? '—' : `${k.responseMinutes} мин`,
+            'гостю, в среднем',
+          ],
+        ] as Array<[string, string, string]>
+      )
+        .map(
+          ([t, v, sub]) =>
+            `<div class="tile"><span class="tile__label">${esc(t)}</span><b>${esc(v)}</b><span class="tile__sub">${esc(sub)}</span></div>`,
+        )
+        .join('')}</div>`;
+  return `<section aria-labelledby="kpi-title">
+    <div class="card__head"><h2 id="kpi-title" class="section-title">Показатели</h2>${helpLink('kpi', 'Что они значат?')}</div>
+    ${body}
+  </section>`;
 }
 
 /**
@@ -231,29 +373,29 @@ function kpiTiles(k: KpiView | null): string {
  */
 function firstSteps(h: HotelView): string {
   const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
-  const steps: Array<{ done: boolean; title: string; href: string; help: string }> = [
+  const steps: Array<{ done: boolean; title: string; anchor: AgentAnchor; help: string }> = [
     {
       done: !!h.profile.name && rooms.length > 0,
       title: 'Заполните эталон: название и номера — можно по ссылке на карточку',
-      href: '#profile-title',
+      anchor: 'profile-title',
       help: 'profile-card',
     },
     {
       done: (h.profile.systems ?? []).length > 0,
-      title: 'Добавьте в эталон PMS и площадки',
-      href: '#profile-title',
+      title: 'Отметьте в эталоне PMS и площадки, где вы работаете',
+      anchor: 'profile-title',
       help: 'systems',
     },
     {
       done: h.settings.agents.some((a) => a.enabled),
       title: 'Включите агентов — начните с «Каналов продаж»',
-      href: '#team-title',
+      anchor: 'team-title',
       help: 'agent-on',
     },
     {
       done: h.telegramLinked,
       title: 'Привяжите Telegram для сводки и согласований',
-      href: '#telegram-title',
+      anchor: 'telegram-title',
       help: 'tg-link',
     },
   ];
@@ -261,11 +403,12 @@ function firstSteps(h: HotelView): string {
   if (!left) return '';
   return `<section class="card steps-card" aria-labelledby="first-title">
     <div class="card__head"><h2 id="first-title">Первые шаги · осталось ${left} из ${steps.length}</h2>${helpLink('topic-start', 'Вся инструкция')}</div>
+    <div class="progress" aria-hidden="true">${steps.map((x) => `<span class="progress__seg${x.done ? ' progress__seg--done' : ''}"></span>`).join('')}</div>
     <ol class="checklist">
 ${steps
   .map(
     (x) =>
-      `      <li class="${x.done ? 'checklist__done' : ''}"><span class="checklist__mark" aria-hidden="true">${x.done ? '✓' : ''}</span><span>${x.done ? `${esc(x.title)}<span class="visually-hidden"> — готово</span>` : `<a href="${x.href}">${esc(x.title)}</a> ${helpLink(x.help, 'как?')}`}</span></li>`,
+      `      <li class="${x.done ? 'checklist__done' : ''}"><span class="checklist__mark" aria-hidden="true">${x.done ? '✓' : ''}</span><span>${x.done ? `${esc(x.title)}<span class="visually-hidden"> — готово</span>` : `<a href="${agentsHref(x.anchor)}">${esc(x.title)}</a> ${helpLink(x.help, 'как?')}`}</span></li>`,
   )
   .join('\n')}
     </ol>
@@ -273,19 +416,20 @@ ${steps
 }
 
 function approvalsBlock(list: ApprovalView[], agents: Map<string, string>): string {
-  if (!list.length) return `<p class="hint">Ничего не ждёт вашего решения.</p>`;
+  if (!list.length)
+    return `<div class="empty-state"><span class="empty-state__mark" aria-hidden="true">✓</span><div><b>Ничего не ждёт вашего решения</b><p class="hint">Когда агенту понадобится ваше «да», карточка появится здесь и в Telegram.</p></div></div>`;
   return list
     .map(
       (a) => `<article class="approval${a.urgent ? ' approval--urgent' : ''}">
-  <p class="approval__agent">${esc(agents.get(a.agent) ?? a.agent)}${a.urgent ? ' · срочно' : ''} · ${esc(when(a.createdAt))}</p>
+  <div class="approval__head"><span class="agent-icon agent-icon--sm" aria-hidden="true">${icon(a.agent)}</span><p class="approval__agent">${esc(agents.get(a.agent) ?? a.agent)} · ${esc(when(a.createdAt))}</p>${a.urgent ? '<span class="chip chip--bad">срочно</span>' : ''}</div>
   <h3>${esc(a.title)}</h3>
   <p class="approval__reason">${esc(a.reason)}</p>
-  ${a.cost ? `<p class="approval__reason">Сколько стоит: ${esc(a.cost)}</p>` : ''}
+  ${a.cost ? `<p class="approval__cost">Сколько стоит: <b>${esc(a.cost)}</b></p>` : ''}
   ${a.action.text ? `<pre class="approval__text">${esc(a.action.text)}</pre>` : ''}
   <div class="row">
     <button class="btn btn--accent btn--sm" type="button" data-act="approve" data-id="${esc(a.id)}">Согласовать</button>
-    <button class="btn btn--ghost btn--sm" type="button" data-act="reject" data-id="${esc(a.id)}">Отклонить</button>
     ${a.action.kind === 'none' ? '' : `<button class="btn btn--ghost btn--sm" type="button" data-act="edit-open" data-id="${esc(a.id)}">Изменить</button>`}
+    <button class="btn btn--ghost btn--sm" type="button" data-act="reject" data-id="${esc(a.id)}">Отклонить</button>
   </div>
   ${
     a.action.kind === 'none'
@@ -300,26 +444,177 @@ function approvalsBlock(list: ApprovalView[], agents: Map<string, string>): stri
     .join('');
 }
 
-function levelSelect(d: HotelView['settings']['agents'][number]['duties'][number]): string {
-  if (d.alwaysOn) return `<span class="muted">всегда</span>`;
-  const options = (['self', 'rule', 'approval', 'off'] as Level[]).filter(
-    (l) => RANK[l] <= RANK[d.maxLevel],
-  );
-  const current = d.enabled ? d.level : 'off';
-  return `<select data-act="level" data-duty="${esc(d.id)}" aria-label="Права «${esc(d.title)}»">${options
+function feedBlock(feed: FeedItem[]): string {
+  if (!feed.length)
+    return `<p class="hint">Сообщений пока нет. Утренняя сводка появится здесь и в Telegram.</p>`;
+  return `<ul class="feed">${feed
     .map(
-      (l) => `<option value="${l}"${l === current ? ' selected' : ''}>${LEVEL_TITLES[l]}</option>`,
+      (f) =>
+        `<li><span class="feed__meta"><span class="chip${f.kind === 'urgent' ? ' chip--bad' : ''}">${esc(FEED_KIND[f.kind] ?? f.kind)}</span> ${esc(when(f.createdAt))}</span><pre>${esc(f.text)}</pre></li>`,
     )
-    .join('')}</select>`;
+    .join('')}</ul>`;
+}
+
+// ---------------------------------------------------------------- «Команда»
+
+/** What the owner is asked before a change of the wave: which duties switch on or off. */
+function waveConfirm(h: HotelView, target: number): string {
+  const cur = h.settings.wave;
+  const head = `Перейти к волне ${target} «${WAVES[target - 1]!.name}» — ${WAVES[target - 1]!.text}?`;
+  if (target > cur) {
+    const on = h.settings.agents
+      .filter((a) => a.enabled)
+      .flatMap((a) =>
+        a.duties
+          .filter(
+            (d) => !d.enabled && d.wave > cur && d.wave <= target && /волн/.test(d.reason ?? ''),
+          )
+          .map((d) => `• ${a.title}: ${d.title}`),
+      );
+    return `${head}\n\n${on.length ? `Включатся с правами по умолчанию:\n${on.join('\n')}` : 'У включённых агентов новых обязанностей нет — обязанности этой волны заработают, когда вы включите агентов.'}\n\nПрава любой обязанности можно поменять в её карточке.`;
+  }
+  const off = h.settings.agents.flatMap((a) =>
+    a.duties.filter((d) => d.enabled && d.wave > target).map((d) => `• ${a.title}: ${d.title}`),
+  );
+  return `${head}\n\n${off.length ? `Выключатся обязанности поздних волн (кроме включённых вами вручную):\n${off.join('\n')}` : 'Обязанности поздних волн сейчас не работают — ничего не выключится.'}`;
+}
+
+function launchBlock(h: HotelView): string {
+  const set = h.settings;
+  const steps = WAVES.map((w, i) => {
+    const n = i + 1;
+    const state = n === set.wave ? 'current' : n < set.wave ? 'done' : 'next';
+    return `<li class="wave wave--${state}">
+        <span class="wave__num" aria-hidden="true">${n < set.wave ? '✓' : n}</span>
+        <span class="wave__text"><b>${n}. ${esc(w.name)}</b><span class="hint">${esc(w.text)}</span></span>
+        ${n === set.wave ? '<span class="chip chip--ok">сейчас</span>' : `<button class="btn btn--ghost btn--xs" type="button" data-act="wave" data-wave="${n}" data-confirm="${esc(waveConfirm(h, n))}">${n > set.wave ? 'Перейти' : 'Вернуться'}</button>`}
+      </li>`;
+  }).join('\n      ');
+  const pause = set.pause
+    ? `<div class="pause pause--on" role="status">
+      <div><b>На паузе до ${esc(day(set.pause.until))}</b>${set.pause.reason ? ` · ${esc(set.pause.reason)}` : ''}<p class="hint">Записи на площадках и сообщения ждут; чтение и сводка идут.</p></div>
+      <button class="btn btn--accent btn--sm" type="button" data-act="settings" data-changes="${attr([{ op: 'pause', until: null }])}" data-done="Пауза снята — агенты снова работают.">Снять паузу</button>
+    </div>`
+    : '';
+  return `<section class="card" aria-labelledby="launch-title">
+    <div class="card__head"><h2 id="launch-title">Режим работы</h2>${helpLink('waves', 'Что такое волны?')}</div>
+    <p class="hint hint--top">Агенты включаются волнами: сначала только смотрят, потом советуют, потом действуют сами. Переходите дальше, когда доверяете им.</p>
+    <ol class="waves">
+      ${steps}
+    </ol>
+    ${pause}
+    <details class="pause-form">
+      <summary>${set.pause ? 'Изменить паузу' : 'Поставить на паузу — ремонт, закрытый сезон'}</summary>
+      <form class="row" data-form="pause">
+        <label class="field"><span class="field__label">Пауза до</span><input name="until" type="date" required value="${esc(set.pause?.until ?? '')}"></label>
+        <label class="field field--grow"><span class="field__label">Причина</span><input name="reason" value="${esc(set.pause?.reason ?? '')}" placeholder="ремонт, сезон закрыт"></label>
+        <div class="field"><button class="btn btn--ghost btn--sm" type="submit">${set.pause ? 'Сохранить' : 'Поставить паузу'}</button></div>
+      </form>
+      <p class="hint">На паузе агенты ничего не меняют на площадках и не пишут гостям; чтение и сводка продолжаются. ${helpLink('pause', 'Подробнее')}</p>
+    </details>
+  </section>`;
+}
+
+function legend(): string {
+  return `<ul class="legend" aria-label="Что значат права">
+${LEVELS.map((l) => `      <li>${dot(l)}<span><b>${LEVEL_TITLES[l]}</b> — ${LEVEL_HINTS[l]}</span></li>`).join('\n')}
+    </ul>`;
+}
+
+/**
+ * Rights of a duty as a row of buttons: the current one is pressed, those above the duty's
+ * ceiling are disabled. While the agent is off the rights cannot be set: the switch comes first.
+ */
+function levelButtons(a: Agent, d: Duty): string {
+  if (d.alwaysOn)
+    return `<span class="chip chip--ok" title="Без неё вы теряете контроль над остальными">Всегда работает</span>`;
+  const current = d.enabled ? d.level : 'off';
+  return `<div class="seg" role="group" aria-label="Права «${esc(d.title)}»">${LEVELS.map((l) => {
+    const above = RANK[l] > RANK[d.maxLevel];
+    const disabled = !a.enabled || above;
+    const title = above
+      ? ` title="Для этой обязанности — не выше «${LEVEL_TITLES[d.maxLevel]}»"`
+      : ` title="${esc(LEVEL_HINTS[l])}"`;
+    return `<button class="seg__btn" type="button" data-act="level" data-duty="${esc(d.id)}" data-title="${esc(d.title)}" data-level="${l}" aria-pressed="${l === current}"${disabled ? ' disabled' : ''}${title}>${dot(l)}${LEVEL_TITLES[l]}</button>`;
+  }).join('')}</div>`;
 }
 
 /**
  * «Выполнить» gives the duty to its agent now. A duty that is off is not run: the server answers
  * with a request for permission, and the page shows it (see the permission dialog).
  */
-function runButton(d: HotelView['settings']['agents'][number]['duties'][number]): string {
+function runButton(d: Duty): string {
   if (d.alwaysOn) return '';
-  return `<br><button class="btn btn--ghost btn--xs duty__run" type="button" data-act="run" data-duty="${esc(d.id)}" data-title="${esc(d.title)}">Выполнить</button>`;
+  return `<button class="btn btn--ghost btn--xs duty__run" type="button" data-act="run" data-duty="${esc(d.id)}" data-title="${esc(d.title)}">Выполнить</button>`;
+}
+
+function dutyRow(a: Agent, d: Duty, wave: number): string {
+  const meta = [
+    `<span>${esc(d.when)}</span>`,
+    d.writes === undefined
+      ? ''
+      : `<span>${d.writes ? 'меняет данные или пишет' : 'только читает и считает'}</span>`,
+    d.maxLevel !== 'self' && !d.alwaysOn
+      ? `<span>права не выше «${LEVEL_TITLES[d.maxLevel]}»</span>`
+      : '',
+  ].filter(Boolean);
+  const reason =
+    !d.enabled && d.reason && a.enabled ? `<p class="duty__reason">${esc(d.reason)}</p>` : '';
+  return `      <li class="duty${d.enabled ? '' : ' duty--off'}">
+        <div class="duty__info">
+          <h4>${esc(d.title)}${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}</h4>
+          <p class="duty__does">${esc(d.does)}</p>
+          <p class="duty__meta">${meta.join('')}</p>
+          ${reason}
+        </div>
+        <div class="duty__controls">${levelButtons(a, d)}${runButton(d)}</div>
+      </li>`;
+}
+
+/**
+ * An agent: icon, title, mission, the switch and how its duties are set are always visible; the
+ * duties are folded by default (the page remembers which cards the owner opened, see app.js).
+ */
+function agentCard(a: Agent, wave: number): string {
+  const working = a.duties.filter((d) => d.enabled);
+  const counts = LEVELS.filter((l) => l !== 'off')
+    .map((l) => [l, working.filter((d) => d.level === l).length] as const)
+    .filter(([, n]) => n > 0);
+  const state = a.enabled
+    ? `<span class="agent__state agent__state--on">работает · ${working.length} из ${duties(a.duties.length)}</span>${counts.length ? `<span class="agent__levels">${counts.map(([l, n]) => `<span class="agent__level">${dot(l)}${LEVEL_TITLES[l]} — ${n}</span>`).join('')}</span>` : ''}`
+    : `<span class="agent__state">выключен · ${duties(a.duties.length)} не работают</span>`;
+  const titleId = `agent-${esc(a.id)}-title`;
+  return `<article class="agent${a.enabled ? ' agent--on' : ''}" id="agent-${esc(a.id)}">
+  <header class="agent__head">
+    <span class="agent-icon" aria-hidden="true">${icon(a.id)}</span>
+    <div class="agent__title">
+      <h3 id="${titleId}">${esc(a.title)}</h3>
+      <p class="agent__mission">${esc(a.mission)}</p>
+    </div>
+    <button class="switch" type="button" role="switch" aria-checked="${a.enabled}" aria-labelledby="${titleId}" data-act="settings" data-changes="${attr([{ op: 'agent', agent: a.id, enabled: !a.enabled }])}" data-done="«${esc(a.title)}» ${a.enabled ? 'выключен' : 'включён'}."><span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span><span class="switch__text" aria-hidden="true">${a.enabled ? 'Работает' : 'Выключен'}</span></button>
+  </header>
+  <p class="agent__summary">${state}</p>
+  <details class="agent__more" data-fold="agent:${esc(a.id)}">
+  <summary>Обязанности и права · ${a.duties.length}</summary>
+  ${a.enabled ? '' : `<p class="notice notice--soft">Агент выключен — обязанности не работают и права не меняются. Включите его переключателем выше; «Выполнить» спросит разрешение на один раз.</p>`}
+  <p class="agent__metrics">Показатели: ${esc(a.metrics.join(', '))}</p>
+  <ul class="duties-list">
+${a.duties.map((d) => dutyRow(a, d, wave)).join('\n')}
+  </ul>
+  </details>
+</article>`;
+}
+
+function teamBlock(h: HotelView): string {
+  const set = h.settings;
+  return `<section aria-labelledby="team-title">
+    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2><span class="row row--tight"><button class="link" type="button" data-fold-all="agent:">Развернуть всё</button>${helpLink('levels', 'Что значат права?')}</span></div>
+    <p class="hint hint--top">Включите агента переключателем, затем раскройте его обязанности и выберите права каждой. «Выполнить» — дать задание сейчас; если обязанность выключена, агент спросит разрешение. ${helpLink('permission', 'Подробнее')}</p>
+    ${legend()}
+    <div class="agents__list">
+${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
+    </div>
+  </section>`;
 }
 
 /** The agent asks the owner before running a duty that is off; without an answer nothing runs. */
@@ -332,93 +627,18 @@ function permissionDialog(): string {
     <button class="btn btn--ghost btn--sm" type="button" data-grant="always">Разрешить всегда</button>
     <button class="btn btn--ghost btn--sm" type="button" data-grant="no">Не выполнять</button>
   </div>
+</dialog>
+<dialog class="permission" data-confirm-dialog aria-labelledby="confirm-title">
+  <h2 id="confirm-title">Подтвердите</h2>
+  <p class="permission__text" data-confirm-text></p>
+  <div class="row">
+    <button class="btn btn--accent btn--sm" type="button" data-answer="yes">Да</button>
+    <button class="btn btn--ghost btn--sm" type="button" data-answer="no">Отмена</button>
+  </div>
 </dialog>`;
 }
 
-/**
- * An agent: title, mission, state and the switch are always visible; duties with their rights are
- * folded by default (the page remembers which cards the owner opened, see app.js).
- */
-function agentCard(a: HotelView['settings']['agents'][number], wave: number): string {
-  const working = a.duties.filter((d) => d.enabled).length;
-  const state = a.enabled
-    ? `<span class="agent__state agent__state--on">работает · ${working} из ${a.duties.length} обязанностей</span>`
-    : `<span class="agent__state">выключен</span>`;
-  return `<article class="agent${a.enabled ? ' agent--on' : ''}">
-  <header class="agent__head">
-    <div>
-      <h3>${esc(a.title)}</h3>
-      <p class="hint">${esc(a.mission)}</p>
-      ${state}
-    </div>
-    <button class="btn btn--sm ${a.enabled ? 'btn--ghost' : 'btn--accent'}" type="button" data-act="settings" data-changes="${attr([{ op: 'agent', agent: a.id, enabled: !a.enabled }])}">${a.enabled ? 'Выключить' : 'Включить'}</button>
-  </header>
-  <details class="agent__more" data-fold="agent:${esc(a.id)}">
-  <summary>Обязанности и права · ${a.duties.length}</summary>
-  <p class="agent__metrics">Показатели: ${esc(a.metrics.join(', '))}</p>
-  <table class="duties">
-    <thead><tr><th>Обязанность</th><th>Когда</th><th>Права</th></tr></thead>
-    <tbody>
-${a.duties
-  .map(
-    (d) => `      <tr class="${d.enabled ? '' : 'duty--off'}">
-        <td><span title="${esc(d.does)}">${esc(d.title)}</span>${d.wave > wave ? ` <span class="badge">волна ${d.wave}</span>` : ''}${!d.enabled && d.reason ? `<br><span class="muted">${esc(d.reason)}</span>` : ''}${runButton(d)}</td>
-        <td>${esc(d.when)}</td>
-        <td>${levelSelect(d)}</td>
-      </tr>`,
-  )
-  .join('\n')}
-    </tbody>
-  </table>
-  </details>
-</article>`;
-}
-
-function platformsBlock(h: HotelView): string {
-  const connected = new Set((h.profile.systems ?? []).map((s) => s.id));
-  const list = h.settings.platforms.filter((p) => connected.has(p.id));
-  if (!list.length)
-    return `<p class="hint">Площадки и системы появятся здесь, когда вы добавите их в эталон объекта (раздел «Системы»).</p>`;
-  return `<table class="duties">
-  <tbody>
-${list
-  .map(
-    (p) =>
-      `    <tr><td>${esc(p.title)}</td><td><select data-act="platform" data-platform="${esc(p.id)}" aria-label="${esc(p.title)}">${(
-        Object.keys(MODES) as Array<keyof typeof MODES>
-      )
-        .map((m) => `<option value="${m}"${m === p.mode ? ' selected' : ''}>${MODES[m]}</option>`)
-        .join('')}</select></td></tr>`,
-  )
-  .join('\n')}
-  </tbody>
-</table>`;
-}
-
-const PROFILE_LISTS: Array<{ key: string; title: string; example: string }> = [
-  {
-    key: 'rooms',
-    title: 'Номера',
-    example: '[{"id":"std","name":"Стандарт","count":4,"capacity":2,"basePrice":5000}]',
-  },
-  {
-    key: 'faq',
-    title: 'Ответы на частые вопросы',
-    example: '[{"topic":"parking","answer":"Парковка во дворе, бесплатно."}]',
-  },
-  {
-    key: 'systems',
-    title: 'Системы и площадки',
-    example:
-      '[{"id":"bnovo","url":"https://online.bnovo.ru/"},{"id":"ostrovok","url":"https://extranet.ostrovok.ru/","messagesUrl":"https://extranet.ostrovok.ru/messages","commissionPercent":15}]',
-  },
-  {
-    key: 'competitors',
-    title: 'Конкуренты (5–10)',
-    example: '[{"name":"Вилла у моря","url":"https://ostrovok.ru/hotel/..."}]',
-  },
-  { key: 'upsells', title: 'Допродажи', example: '[{"name":"Ранний заезд","price":1000}]' },
-];
+// ---------------------------------------------------------------- «Объект»
 
 const safeUrl = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null);
 
@@ -625,7 +845,7 @@ function importBlock(imp: ProfileImportView | null | undefined): string {
   if (imp?.status === 'ready')
     return `<form class="import import--ready" data-form="import-apply" data-id="${esc(imp.id)}">
   <h3>Черновик из карточки${where}: найдено ${imp.fields.length}</h3>
-${imp.partial ? `  <p class="hint warn">Карточка прочитана не полностью (${esc(imp.partial)}) — части полей может не быть. Примените найденное и пришлите карточку ещё раз или вставьте её текст.</p>\n` : ''}  <p class="hint">Отметьте, что перенести в эталон. Списки дополняются, а не заменяются; у новых номеров количество — 1, проверьте его потом в поле «Номера».</p>
+${imp.partial ? `  <p class="hint warn">Карточка прочитана не полностью (${esc(imp.partial)}) — части полей может не быть. Примените найденное и пришлите карточку ещё раз или вставьте её текст.</p>\n` : ''}  <p class="hint">Отметьте, что перенести в эталон. Списки дополняются, а не заменяются; у новых номеров количество — 1, проверьте его потом в разделе «Номера».</p>
   <div class="table-scroll"><table class="duties import__table">
     <thead><tr><th><span class="visually-hidden">Перенести</span></th><th>Поле</th><th>Из карточки</th><th>Сейчас в эталоне</th></tr></thead>
     <tbody>
@@ -660,64 +880,342 @@ ${imp.fields
 </div>`;
 }
 
+/** Topics of guest questions Goldfish recognises (the reference's `faq[].topic`). */
+const FAQ_TOPICS: Array<[string, string]> = [
+  ['parking', 'Парковка'],
+  ['checkin', 'Заезд'],
+  ['pets', 'Животные'],
+  ['price', 'Цена'],
+  ['transfer', 'Трансфер'],
+  ['breakfast', 'Завтрак'],
+  ['other', 'Другое'],
+];
+
+interface ListColumn {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'url' | 'topic' | 'textarea';
+  required?: boolean;
+  placeholder?: string;
+  /** Takes the rest of the row. */
+  wide?: boolean;
+}
+
+/**
+ * A list of the reference (rooms, answers, extras, competitors) as rows of fields instead of
+ * JSON. Each row keeps the item it was made from (`data-item`): app.js changes only the fields
+ * shown, so what the page does not show (a room's photos, a question's wording) is kept.
+ */
+function listEditor(
+  key: string,
+  cols: ListColumn[],
+  items: Array<Record<string, unknown>>,
+  add: string,
+): string {
+  const cell = (c: ListColumn, value: unknown) => {
+    const v = value === undefined || value === null ? '' : String(value);
+    const label = `<span class="field__label">${esc(c.label)}</span>`;
+    const common = `data-key="${c.key}" data-type="${c.type === 'number' ? 'number' : 'text'}"${c.required ? ' data-required' : ''}`;
+    if (c.type === 'topic')
+      return `<label class="field"><span class="field__label">${esc(c.label)}</span><select ${common}>${FAQ_TOPICS.map(([t, title]) => `<option value="${t}"${t === v ? ' selected' : ''}>${title}</option>`).join('')}</select></label>`;
+    if (c.type === 'textarea')
+      return `<label class="field field--wide">${label}<textarea ${common} rows="2" placeholder="${esc(c.placeholder ?? '')}">${esc(v)}</textarea></label>`;
+    return `<label class="field${c.wide ? ' field--wide' : ''}">${label}<input ${common} type="${c.type === 'number' ? 'number' : c.type}"${c.type === 'number' ? ' min="0" inputmode="numeric"' : ''} value="${esc(v)}" placeholder="${esc(c.placeholder ?? '')}"></label>`;
+  };
+  const row = (item: Record<string, unknown>) =>
+    `<div class="list-edit__row" data-item="${attr(item)}">${cols.map((c) => cell(c, item[c.key])).join('')}<button class="list-edit__remove" type="button" data-list-remove aria-label="Удалить строку" title="Удалить">×</button></div>`;
+  return `<div class="list-edit list-edit--${esc(key)}" data-list="${esc(key)}">
+    <div class="list-edit__rows">${items.map(row).join('')}</div>
+    <template data-list-template>${row({})}</template>
+    <button class="btn btn--ghost btn--sm" type="button" data-list-add>+ ${esc(add)}</button>
+  </div>`;
+}
+
+/**
+ * «Системы и площадки»: every system Goldfish knows, by kind, with a checkbox and the address of
+ * the owner's cabinet. A connected system keeps its other fields (messages, commission…).
+ */
+function systemsEditor(h: HotelView): string {
+  const connected = new Map(
+    ((h.profile.systems ?? []) as Array<Record<string, unknown> & { id: string }>).map((s) => [
+      s.id,
+      s,
+    ]),
+  );
+  const known = new Set(h.settings.platforms.map((p) => p.id));
+  const groups = new Map<string, HotelView['settings']['platforms']>();
+  for (const p of h.settings.platforms) {
+    const list = groups.get(p.category) ?? [];
+    list.push(p);
+    groups.set(p.category, list);
+  }
+  const field = (
+    item: Record<string, unknown> | undefined,
+    key: string,
+    label: string,
+    type: 'url' | 'number',
+    title: string,
+  ) =>
+    `<label class="field"><span class="field__label">${label}</span><input type="${type}" data-key="${key}" data-type="${type === 'number' ? 'number' : 'text'}"${type === 'number' ? ' min="0" max="100" step="0.1"' : ' placeholder="https://…"'} value="${esc(String(item?.[key] ?? ''))}" aria-label="${label}: ${esc(title)}"></label>`;
+  const sys = (id: string, title: string, category: string) => {
+    const item = connected.get(id);
+    // Platforms for guests and agencies also have chats, reviews, a listing and a commission.
+    const more =
+      category === 'guest' || category === 'b2b'
+        ? `<details class="sys__more"${item && (item.messagesUrl || item.reviewsUrl || item.listingUrl || item.commissionPercent !== undefined) ? ' open' : ''}>
+          <summary>Сообщения, отзывы, комиссия</summary>
+          ${field(item, 'messagesUrl', 'Страница сообщений гостей', 'url', title)}
+          ${field(item, 'reviewsUrl', 'Страница отзывов', 'url', title)}
+          ${field(item, 'listingUrl', 'Ваше объявление, как его видят гости', 'url', title)}
+          ${field(item, 'commissionPercent', 'Комиссия площадки, %', 'number', title)}
+        </details>`
+        : '';
+    return `<div class="sys" data-sys="${esc(id)}" data-item="${attr(item ?? { id })}">
+        <label class="sys__check"><input type="checkbox" data-sys-on${item ? ' checked' : ''}> ${esc(title)}</label>
+        <input class="sys__url" type="url" data-key="url" data-type="text" value="${esc(String(item?.url ?? ''))}" placeholder="адрес вашего кабинета, https://…" aria-label="Адрес кабинета: ${esc(title)}">
+        ${more}
+      </div>`;
+  };
+  const other = [...connected.keys()].filter((id) => !known.has(id));
+  return `<div class="systems-edit" data-systems>
+${[...groups]
+  .map(
+    ([cat, list]) => `    <fieldset class="sys-group">
+      <legend>${esc(CATEGORIES[cat] ?? cat)}</legend>
+      ${list.map((p) => sys(p.id, p.title, p.category)).join('\n      ')}
+    </fieldset>`,
+  )
+  .join('\n')}
+${other.length ? `    <fieldset class="sys-group"><legend>Другие</legend>${other.map((id) => sys(id, id, 'other')).join('')}</fieldset>` : ''}
+  </div>`;
+}
+
+/** A part of the reference: folded, with what is filled in it next to the title. */
+function group(id: string, title: string, note: string, open: boolean, body: string): string {
+  return `<details class="group" id="${id}"${open ? ' open' : ''}>
+    <summary><span>${esc(title)}</span>${note ? `<span class="group__note">${esc(note)}</span>` : ''}</summary>
+    <div class="group__body">${body}</div>
+  </details>`;
+}
+
 function profileForm(h: HotelView): string {
   const p = h.profile as Record<string, unknown>;
   const policies = (p.policies ?? {}) as Record<string, string>;
   const corridor = (p.priceCorridor ?? { percent: 10 }) as { percent: number };
-  const text = (name: string, label: string, value: unknown, type = 'text') =>
-    `<label class="field"><span class="field__label">${esc(label)}</span><input name="${esc(name)}" type="${type}" value="${esc(String(value ?? ''))}"></label>`;
+  const list = (k: string) => (Array.isArray(p[k]) ? (p[k] as Array<Record<string, unknown>>) : []);
+  const rooms = list('rooms');
+  const systems = list('systems');
+  const faq = list('faq');
+  const upsells = list('upsells');
+  const competitors = list('competitors');
+  const units = rooms.reduce((n, r) => n + (Number(r.count) || 0), 0);
+  const text = (name: string, label: string, value: unknown, type = 'text', placeholder = '') =>
+    `<label class="field"><span class="field__label">${esc(label)}</span><input name="${esc(name)}" type="${type}" value="${esc(String(value ?? ''))}"${placeholder ? ` placeholder="${esc(placeholder)}"` : ''}></label>`;
   return `<form class="profile" data-form="profile">
-  <div class="grid2">
-    ${text('name', 'Название', p.name)}
+  ${group(
+    'profile-main',
+    'Основное',
+    p.name ? String(p.name) : 'не заполнено',
+    !p.name,
+    `<div class="grid2">
+    ${text('name', 'Название', p.name, 'text', 'как на площадках')}
     ${text('address', 'Адрес', p.address)}
     ${text('phone', 'Телефон', p.phone)}
-    ${text('website', 'Сайт', p.website ?? '', 'url')}
+    ${text('website', 'Сайт', p.website ?? '', 'url', 'https://…')}
+  </div>`,
+  )}
+  ${group(
+    'profile-rooms',
+    'Номера',
+    rooms.length
+      ? `${rooms.length} категор${rooms.length === 1 ? 'ия' : rooms.length < 5 ? 'ии' : 'ий'}, номеров — ${units}`
+      : 'не заполнено',
+    !rooms.length,
+    `<p class="hint hint--top">Категории номеров, как на площадках. Без них управляющий не посчитает загрузку, ADR и RevPAR. ${helpLink('rooms', 'Подробнее')}</p>
+  ${listEditor(
+    'rooms',
+    [
+      {
+        key: 'name',
+        label: 'Категория',
+        type: 'text',
+        required: true,
+        placeholder: 'Стандарт',
+        wide: true,
+      },
+      { key: 'count', label: 'Сколько номеров', type: 'number', required: true, placeholder: '1' },
+      { key: 'capacity', label: 'Гостей', type: 'number', placeholder: '2' },
+      { key: 'basePrice', label: 'Базовая цена ночи, ₽', type: 'number', placeholder: '5000' },
+    ],
+    rooms,
+    'Добавить категорию',
+  )}`,
+  )}
+  ${group(
+    'profile-systems',
+    'Системы и площадки',
+    systems.length ? `подключено ${systems.length}` : 'ничего не отмечено',
+    !systems.length,
+    `<p class="hint hint--top">Отметьте PMS, площадки и кабинеты, где ведёте объект. Адрес кабинета — ссылка, по которой вы входите; агенты работают в вашем браузере с вашими входами. Объявления для гостей проще подключить кнопкой «Найти объявления» ниже. ${helpLink('systems', 'Подробнее')}</p>
+  ${systemsEditor(h)}`,
+  )}
+  ${group(
+    'profile-rules',
+    'Заезд и правила',
+    `заезд с ${p.checkIn ?? '—'}, выезд до ${p.checkOut ?? '—'}`,
+    false,
+    `<div class="grid2">
     ${text('checkIn', 'Заезд с', p.checkIn, 'time')}
     ${text('checkOut', 'Выезд до', p.checkOut, 'time')}
-    ${text('corridor', 'Коридор цены, ± % от базовой', corridor.percent, 'number')}
-    ${text('adsMonthlyBudget', 'Бюджет рекламы в месяц, ₽', p.adsMonthlyBudget ?? '', 'number')}
-  </div>
-  <div class="grid2">
-    ${text('policies.children', 'Дети', policies.children)}
-    ${text('policies.pets', 'Животные', policies.pets)}
-    ${text('policies.prepayment', 'Предоплата', policies.prepayment)}
-    ${text('policies.cancellation', 'Отмена', policies.cancellation)}
+    ${text('policies.children', 'Дети', policies.children, 'text', 'с любого возраста')}
+    ${text('policies.pets', 'Животные', policies.pets, 'text', 'можно, 500 ₽ в сутки')}
+    ${text('policies.prepayment', 'Предоплата', policies.prepayment, 'text', '30% при бронировании')}
+    ${text('policies.cancellation', 'Отмена', policies.cancellation, 'text', 'бесплатно за 3 дня')}
   </div>
   <label class="field"><span class="field__label">Как добраться</span><textarea name="directions" rows="2">${esc(String(p.directions ?? ''))}</textarea></label>
-  <label class="field"><span class="field__label">Удобства (через запятую)</span><input name="amenities" value="${esc(((p.amenities as string[]) ?? []).join(', '))}"></label>
-${PROFILE_LISTS.map(
-  (l) =>
-    `  <label class="field"><span class="field__label">${esc(l.title)} (JSON)</span><textarea class="code" name="${l.key}" rows="4" placeholder="${esc(l.example)}">${esc(JSON.stringify(p[l.key] ?? [], null, 1))}</textarea></label>`,
-).join('\n')}
+  <label class="field"><span class="field__label">Удобства (через запятую)</span><input name="amenities" value="${esc(((p.amenities as string[]) ?? []).join(', '))}" placeholder="Wi-Fi, парковка, мангал"></label>`,
+  )}
+  ${group(
+    'profile-faq',
+    'Ответы гостям',
+    faq.length ? `готовых ответов — ${faq.length}` : 'нет',
+    false,
+    `<p class="hint hint--top">Готовые ответы на частые вопросы: агент «Гости» отправит их как есть. На жалобы агент сам не отвечает — пришлёт вам черновик. ${helpLink('faq', 'Подробнее')}</p>
+  ${listEditor(
+    'faq',
+    [
+      { key: 'topic', label: 'Тема', type: 'topic' },
+      {
+        key: 'answer',
+        label: 'Ответ',
+        type: 'textarea',
+        required: true,
+        placeholder: 'Парковка во дворе, бесплатно.',
+      },
+    ],
+    faq,
+    'Добавить ответ',
+  )}`,
+  )}
+  ${group(
+    'profile-prices',
+    'Цены, допродажи, реклама',
+    `коридор ±${corridor.percent}%`,
+    false,
+    `<div class="grid2">
+    ${text('corridor', 'Коридор цены, ± % от базовой', corridor.percent, 'number')}
+    ${text('adsMonthlyBudget', 'Бюджет рекламы в месяц, ₽', p.adsMonthlyBudget ?? '', 'number', 'не задан')}
+  </div>
+  <p class="hint hint--top">В коридоре «Цены и загрузка» меняют цену по правилу, за коридором — только с вашего согласия.</p>
+  <h4 class="group__sub">Допродажи</h4>
+  ${listEditor(
+    'upsells',
+    [
+      {
+        key: 'name',
+        label: 'Что',
+        type: 'text',
+        required: true,
+        placeholder: 'Ранний заезд',
+        wide: true,
+      },
+      { key: 'price', label: 'Цена, ₽', type: 'number', placeholder: '1000' },
+    ],
+    upsells,
+    'Добавить допродажу',
+  )}`,
+  )}
+  ${group(
+    'profile-competitors',
+    'Конкуренты',
+    competitors.length ? `${competitors.length} из 10` : 'нет',
+    false,
+    `<p class="hint hint--top">Их цены агент сравнивает с вашими. Проще найти их кнопкой «Найти конкурентов» ниже — агент отберёт прямых сам. ${helpLink('competitors', 'Подробнее')}</p>
+  ${listEditor(
+    'competitors',
+    [
+      { key: 'name', label: 'Название', type: 'text', required: true, wide: true },
+      {
+        key: 'url',
+        label: 'Ссылка',
+        type: 'url',
+        required: true,
+        placeholder: 'https://ostrovok.ru/hotel/…',
+        wide: true,
+      },
+    ],
+    competitors,
+    'Добавить конкурента',
+  )}`,
+  )}
   <input type="hidden" name="base" value="${attr(p)}">
-  <p class="error" data-error hidden></p>
-  <button class="btn btn--accent" type="submit">Сохранить эталон</button>
-  <p class="hint">Версия эталона: ${h.profileVersion}. Изменения сразу уходят агентам: «Каналы продаж» подготовят один пакет правок для всех площадок на согласование.</p>
+  <div class="savebar">
+    <button class="btn btn--accent" type="submit">Сохранить эталон</button>
+    <span class="hint">Версия ${h.profileVersion}. Изменения сразу уходят агентам: «Каналы продаж» подготовят одно согласование правок для всех площадок.</span>
+  </div>
+  <p class="error" data-error role="alert" hidden></p>
 </form>`;
+}
+
+// ---------------------------------------------------------------- «Настройки»
+
+function platformsBlock(h: HotelView): string {
+  const connected = new Set((h.profile.systems ?? []).map((s) => s.id));
+  const list = h.settings.platforms.filter((p) => connected.has(p.id));
+  if (!list.length)
+    return `<p class="hint">Площадки и системы появятся здесь, когда вы отметите их в эталоне объекта — раздел «Системы и площадки». <a href="${agentsHref('profile-title')}">Открыть эталон</a></p>`;
+  return `<ul class="platforms">
+${list
+  .map(
+    (p) =>
+      `    <li class="platform"><span class="platform__title"><b>${esc(p.title)}</b><span class="muted">${esc(CATEGORIES[p.category] ?? p.category)} · агенты ${MODE_HINTS[p.mode]}</span></span><span class="seg seg--modes" role="group" aria-label="Режим: ${esc(p.title)}">${(
+        Object.keys(MODES) as Array<keyof typeof MODES>
+      )
+        .map(
+          (m) =>
+            `<button class="seg__btn" type="button" data-act="platform" data-platform="${esc(p.id)}" data-title="${esc(p.title)}" data-mode="${m}" aria-pressed="${m === p.mode}" title="Агенты ${MODE_HINTS[m]}">${MODES[m]}</button>`,
+        )
+        .join('')}</span></li>`,
+  )
+  .join('\n')}
+  </ul>`;
 }
 
 function ownerForm(h: HotelView): string {
   const o = h.settings.owner;
-  return `<form class="grid2" data-form="owner">
-  <label class="field"><span class="field__label">Сводка в</span><input name="summaryTime" type="time" value="${esc(o.summaryTime)}"></label>
-  <label class="field"><span class="field__label">Срочных в день, не больше</span><input name="urgentPerDay" type="number" min="0" max="50" value="${o.urgentPerDay}"></label>
-  <label class="field"><span class="field__label">Тихие часы с</span><input name="quietFrom" type="time" value="${esc(o.quietFrom)}"></label>
-  <label class="field"><span class="field__label">до</span><input name="quietTo" type="time" value="${esc(o.quietTo)}"></label>
-  <label class="field"><span class="field__label">Отвечать на отзывы сам — от звёзд</span><input name="reviewAutoMinStars" type="number" min="1" max="6" value="${h.settings.limits.reviewAutoMinStars}"></label>
-  <div class="field"><button class="btn btn--ghost btn--sm" type="submit">Сохранить</button></div>
+  const stars = h.settings.limits.reviewAutoMinStars;
+  return `<form class="owner" data-form="owner">
+  <div class="grid2">
+    <label class="field"><span class="field__label">Утренняя сводка в</span><input name="summaryTime" type="time" value="${esc(o.summaryTime)}"></label>
+    <label class="field"><span class="field__label">Срочных в день, не больше</span><input name="urgentPerDay" type="number" min="0" max="50" value="${o.urgentPerDay}"><span class="field__hint">сверх лимита — в следующую сводку</span></label>
+    <div class="field"><span class="field__label" id="quiet-label">Тихие часы</span><span class="field__pair" role="group" aria-labelledby="quiet-label"><input name="quietFrom" type="time" value="${esc(o.quietFrom)}" aria-label="Тихие часы с"><span aria-hidden="true">—</span><input name="quietTo" type="time" value="${esc(o.quietTo)}" aria-label="Тихие часы до"></span><span class="field__hint">в это время срочное ждёт утра</span></div>
+    <label class="field"><span class="field__label">Отвечать на отзывы без согласования</span><select name="reviewAutoMinStars">${[
+      5, 4, 3, 2, 1, 6,
+    ]
+      .map(
+        (n) =>
+          `<option value="${n}"${n === stars ? ' selected' : ''}>${n === 6 ? 'никогда — все ответы на согласование' : n === 1 ? 'на все отзывы' : `на ${n}★${n < 5 ? ' и выше' : ''}`}</option>`,
+      )
+      .join(
+        '',
+      )}</select><span class="field__hint">на остальные — черновик вам на согласование</span></label>
+  </div>
+  <button class="btn btn--ghost btn--sm" type="submit">Сохранить</button>
 </form>`;
 }
 
 function telegramBlock(h: HotelView): string {
   if (h.telegramBot === false)
-    return `<p class="hint">Telegram-бот ещё не настроен на сервере. Пока сообщения управляющего — в ленте ниже.</p>`;
-  return `<p>${h.telegramLinked ? 'Telegram привязан: сводки, срочное и согласования приходят туда.' : 'Привяжите Telegram — управляющий будет присылать сводку, срочное и кнопки согласований.'}</p>
-<button class="btn ${h.telegramLinked ? 'btn--ghost' : 'btn--accent'} btn--sm" type="button" data-act="telegram">${h.telegramLinked ? 'Привязать другой чат' : 'Привязать Telegram'}</button>
-<p class="hint" data-telegram hidden></p>`;
+    return `<p class="hint">Telegram-бот ещё не настроен на сервере. Пока сообщения управляющего — на вкладке «Сегодня».</p>`;
+  return `<div class="tg-link${h.telegramLinked ? ' tg-link--on' : ''}">
+  <p>${h.telegramLinked ? '<b>Telegram привязан</b> — сводки, срочное и согласования приходят туда.' : '<b>Telegram не привязан.</b> Привяжите — управляющий будет присылать сводку, срочное и кнопки согласований.'}</p>
+  <button class="btn ${h.telegramLinked ? 'btn--ghost' : 'btn--accent'} btn--sm" type="button" data-act="telegram">${h.telegramLinked ? 'Привязать другой чат' : 'Привязать Telegram'}</button>
+  <p class="hint" data-telegram hidden></p>
+</div>`;
 }
 
 function hookBlock(goldfishUrl: string): string {
-  return `<p class="hint">Для писем-уведомлений площадок, вебхуков PMS и своего мессенджера: адреса с токеном объекта. Новый токен отзывает старый.</p>
+  return `<p class="hint hint--top">Для писем-уведомлений площадок, вебхуков PMS и своего мессенджера: адреса с токеном объекта. Новый токен отзывает старый.</p>
 <button class="btn btn--ghost btn--sm" type="button" data-act="hook-token" data-base="${esc(goldfishUrl)}">Выпустить токен вебхуков</button>
 <div class="field" data-hook hidden>
   <span class="field__label">События (PMS, мессенджер)</span>
@@ -727,17 +1225,22 @@ function hookBlock(goldfishUrl: string): string {
 </div>`;
 }
 
-function feedBlock(feed: FeedItem[]): string {
-  if (!feed.length) return `<p class="hint">Сообщений пока нет.</p>`;
-  return `<ul class="feed">${feed
-    .map(
-      (f) =>
-        `<li><span class="feed__meta">${esc(FEED_KIND[f.kind] ?? f.kind)} · ${esc(when(f.createdAt))}</span><pre>${esc(f.text)}</pre></li>`,
-    )
-    .join('')}</ul>`;
+// ---------------------------------------------------------------- the page
+
+/** Messages after a change: fixed at the bottom of the screen, so the page does not jump. */
+function toasts(): string {
+  return `<div class="toasts">
+  <div class="toast toast--error" data-page-error role="alert" hidden><span data-toast-text></span><button class="toast__close" type="button" data-toast-close aria-label="Скрыть">×</button></div>
+  <div class="toast" data-page-status role="status" hidden><span data-toast-text></span><button class="toast__close" type="button" data-toast-close aria-label="Скрыть">×</button></div>
+</div>`;
 }
 
-/** The owner's agents: team and rights, approvals, numbers, Telegram, the property reference. */
+/**
+ * The owner's agents in four tabs: «Сегодня» (what waits for them, numbers, messages),
+ * «Команда» (agents, rights, waves, pause), «Объект» (the reference, listings, competitors) and
+ * «Настройки» (platforms, Telegram, webhooks). Every tab is in the page: app.js switches them
+ * without a reload; without a script `?tab=` opens one.
+ */
 export function renderAgents(s: AgentsState): string {
   const h = s.hotel;
   if (!h) {
@@ -752,70 +1255,27 @@ export function renderAgents(s: AgentsState): string {
 </main>`,
     );
   }
+  const tab = s.tab ?? 'today';
   const agents = new Map(h.settings.agents.map((a) => [a.id, a.title]));
-  const set = h.settings;
   const name = String(h.profile.name ?? '');
-  return layout(
-    s,
-    'Агенты — Goldfish',
-    `${header(s.user)}
-<main class="wrap agents">
-  <section class="hero hero--user">
-    <div class="hero__text">
-      <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
-      <h1>${name ? esc(name) : 'Ваш объект'}</h1>
-      <p class="lead">Управляющий и пять агентов. Права у каждой обязанности — «Сам», «Правило» или «Согласование»; выключить можно агента, обязанность, площадку или поставить паузу. Выключенную обязанность агент выполнит только с вашего разрешения.</p>
-    </div>
-  </section>
-  ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
-  <p class="error" data-page-error role="alert" hidden></p>
-  <p class="notice" data-page-status role="status" hidden></p>
-  ${firstSteps(h)}
-  ${kpiTiles(s.kpi)}
+  const guest = h.settings.platforms
+    .filter((p) => p.category === 'guest')
+    .map((p) => ({ id: p.id, title: p.title }));
+  const today = `  ${firstSteps(h)}
   <section class="card" aria-labelledby="approvals-title">
     <div class="card__head"><h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
     ${approvalsBlock(s.approvals, agents)}
   </section>
-  <section class="card" aria-labelledby="launch-title">
-    <div class="card__head"><h2 id="launch-title">Запуск</h2>${helpLink('waves', 'Что такое волны?')}</div>
-    <div class="row">
-      <label class="field"><span class="field__label">Волна</span><select data-act="wave" aria-label="Волна">${[
-        1, 2, 3,
-      ]
-        .map(
-          (w) =>
-            `<option value="${w}"${w === set.wave ? ' selected' : ''}>${w} — ${['видеть всё и не терять брони', 'отвечать и советовать', 'действовать по правилам'][w - 1]}</option>`,
-        )
-        .join('')}</select></label>
-    </div>
-    <form class="row" data-form="pause">
-      <label class="field"><span class="field__label">Пауза до</span><input name="until" type="date" value="${esc(set.pause?.until ?? '')}"></label>
-      <label class="field"><span class="field__label">Причина</span><input name="reason" value="${esc(set.pause?.reason ?? '')}" placeholder="ремонт, сезон закрыт"></label>
-      <div class="field"><button class="btn btn--ghost btn--sm" type="submit">Поставить паузу</button>${set.pause ? ` <button class="btn btn--ghost btn--sm" type="button" data-act="settings" data-changes="${attr([{ op: 'pause', until: null }])}">Снять паузу</button>` : ''}</div>
-    </form>
-    <p class="hint">На паузе записи на площадках и сообщения ждут, чтение и сводка идут.</p>
-  </section>
-  <section aria-labelledby="team-title">
-    <div class="card__head"><h2 id="team-title" class="section-title">Команда</h2><span class="row row--tight"><button class="link" type="button" data-fold-all="agent:">Развернуть всё</button>${helpLink('levels', 'Что значат права?')}</span></div>
-    <p class="hint">«Выполнить» — дать задание сейчас. Если обязанность выключена, агент спросит разрешение. ${helpLink('permission', 'Подробнее')}</p>
-    <div class="agents__grid">
-${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
-    </div>
-  </section>
-  <section class="cabinet">
-    <article class="card">
-      <div class="card__head"><h2 id="platforms-title">Площадки</h2>${helpLink('platforms', 'Режимы')}</div>
-      ${platformsBlock(h)}
-    </article>
-    <article class="card">
-      <div class="card__head"><h2 id="telegram-title">Управляющий и Telegram</h2>${helpLink('tg-commands', 'Команды')}</div>
-      ${telegramBlock(h)}
-      ${ownerForm(h)}
-    </article>
-  </section>
-  <section class="card" aria-labelledby="profile-title">
+  ${kpiTiles(s.kpi)}
+  <section class="card" aria-labelledby="feed-title">
+    <div class="card__head"><h2 id="feed-title">Сообщения управляющего</h2>${helpLink('tg-commands', 'Что можно спросить?')}</div>
+    ${feedBlock(s.feed)}
+  </section>`;
+  const team = `  ${launchBlock(h)}
+  ${teamBlock(h)}`;
+  const property = `  <section class="card" aria-labelledby="profile-title">
     <div class="card__head"><h2 id="profile-title">Эталон объекта</h2>${helpLink('profile-card', 'Как заполнить?')}</div>
-    <p class="hint">Единый источник правды для всех агентов: по нему сверяются карточки и сайт, из него собираются ответы гостям.</p>
+    <p class="hint hint--top">Единый источник правды для всех агентов: по нему сверяются карточки и сайт, из него собираются ответы гостям.</p>
     ${importBlock(s.profileImport)}
     <details class="profile__manual"${s.profileImport?.status === 'ready' ? '' : ' open'}>
       <summary>Заполнить вручную</summary>
@@ -824,30 +1284,48 @@ ${set.agents.map((a) => agentCard(a, set.wave)).join('\n')}
   </section>
   <section class="cabinet" aria-label="После эталона">
     <article class="card">
-      <div class="card__head"><h2 id="listings-title">Объявления на площадках</h2></div>
-      ${listingsBlock(
-        s.listings,
-        h.settings.platforms
-          .filter((p) => p.category === 'guest')
-          .map((p) => ({ id: p.id, title: p.title })),
-      )}
+      <div class="card__head"><h2 id="listings-title">Объявления на площадках</h2>${helpLink('systems', 'Зачем?')}</div>
+      ${listingsBlock(s.listings, guest)}
     </article>
     <article class="card">
       <div class="card__head"><h2 id="competitors-title">Конкуренты</h2><span class="row row--tight"><a href="/agents/prices">Цены</a>${helpLink('competitors-auto', 'Как агент решает?')}</span></div>
       ${competitorsBlock(s.competitorSearch, ((h.profile.competitors as unknown[] | undefined) ?? []).length)}
     </article>
+  </section>`;
+  const settings = `  <section class="card" aria-labelledby="platforms-title">
+    <div class="card__head"><h2 id="platforms-title">Площадки</h2>${helpLink('platforms', 'Что значат режимы?')}</div>
+    <p class="hint hint--top">Что агентам можно на каждой подключённой площадке: работать, только сверять или пропускать её.</p>
+    ${platformsBlock(h)}
   </section>
-  <section class="cabinet">
-    <article class="card">
-      <h2 id="feed-title">Сообщения управляющего</h2>
-      ${feedBlock(s.feed)}
-    </article>
-    <article class="card">
-      <div class="card__head"><h2 id="hooks-title">Вебхуки объекта</h2>${helpLink('mail', 'Зачем они?')}</div>
-      ${hookBlock(s.goldfishUrl)}
-    </article>
+  <section class="card" aria-labelledby="telegram-title">
+    <div class="card__head"><h2 id="telegram-title">Управляющий и Telegram</h2>${helpLink('tg-quiet', 'Как настроить?')}</div>
+    ${telegramBlock(h)}
+    ${ownerForm(h)}
   </section>
+  <section class="card" aria-labelledby="hooks-title">
+    <div class="card__head"><h2 id="hooks-title">Вебхуки объекта</h2>${helpLink('mail', 'Зачем они?')}</div>
+    ${hookBlock(s.goldfishUrl)}
+  </section>`;
+  return layout(
+    s,
+    `${TAB_TITLES[tab]} — агенты — Goldfish`,
+    `${header(s.user)}
+<main class="wrap agents" data-agents>
+  <section class="hero hero--user hero--agents">
+    <div class="hero__text">
+      <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
+      <h1>${name ? esc(name) : 'Ваш объект'}</h1>
+      ${statusStrip(h, s.approvals)}
+    </div>
+  </section>
+  ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
+  ${tabsNav(tab, s.approvals.length)}
+  ${panel('today', tab, today)}
+  ${panel('team', tab, team)}
+  ${panel('property', tab, property)}
+  ${panel('settings', tab, settings)}
   ${permissionDialog()}
+  ${toasts()}
 </main>`,
   );
 }

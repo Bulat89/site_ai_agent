@@ -87,7 +87,7 @@ describe('«Цены»: the dashboard of the direct competitors’ prices', () =
     };
     const html = (await t.app.inject({ url: '/agents/prices', cookies })).body;
     expect(html).toContain('Прямых конкурентов пока нет — запустите поиск конкурентов.');
-    expect(html).toContain('href="/agents#competitors-title"');
+    expect(html).toContain('href="/agents?tab=property#competitors-title"');
     expect(html).not.toContain('class="viz"');
   });
 

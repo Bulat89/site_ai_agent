@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { esc } from '../src/pages/page.js';
 import { PUBLIC_URL, signIn, startApp, type TestApp } from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
@@ -26,22 +27,28 @@ describe('agents page', () => {
     expect(res.headers['cache-control']).toContain('no-store');
     const html = res.body;
     expect(html).toContain('<h1>Дом у моря</h1>');
-    // Team: agent switch, rights only up to the duty's ceiling, always-on duties have no select.
-    expect(html).toContain('<h3>Каналы продаж</h3>');
-    const fix = /<select data-act="level" data-duty="channels.fix"[^>]*>(.*?)<\/select>/s.exec(
-      html,
-    )![1]!;
-    expect(fix).toContain('<option value="approval" selected>Согласование</option>');
-    expect(fix).toContain('<option value="rule">Правило</option>');
-    expect(fix).not.toContain('value="self"');
+    // Team: agent switch, rights as buttons up to the duty's ceiling, always-on duties have none.
+    expect(html).toContain('<h3 id="agent-channels-title">Каналы продаж</h3>');
+    const level = (duty: string, l: string) =>
+      new RegExp(`<button [^>]*data-duty="${duty}"[^>]*data-level="${l}"[^>]*>`).exec(html)![0];
+    expect(level('channels.fix', 'approval')).toContain('aria-pressed="true"');
+    expect(level('channels.fix', 'rule')).toContain('aria-pressed="false"');
+    expect(level('channels.fix', 'rule')).not.toContain('disabled');
+    expect(level('channels.fix', 'self')).toContain(' disabled');
+    expect(level('channels.fix', 'self')).toContain('не выше «Правило»');
+    expect(html).toContain('права не выше «Правило»');
     expect(html).not.toContain('data-duty="manager.approvals"');
+    expect(html).toContain('Всегда работает');
     // Every duty but the always-on ones can be given now; one that is off asks for permission.
     expect(html).toContain(
       'data-act="run" data-duty="channels.sync" data-title="Сверка цен и наличия">Выполнить</button>',
     );
     expect(html).toContain('<dialog class="permission" data-permission');
     expect(html).toContain('Разрешить один раз');
-    expect(html).toContain('включится в волне 2');
+    // The manager is off: its duties wait for the switch, their rights cannot be set.
+    expect(html).toContain('<span class="badge">волна 2</span>');
+    expect(level('manager.weekly', 'approval')).toContain(' disabled');
+    expect(html).toContain('Агент выключен — обязанности не работают');
     // Approvals, text escaped.
     expect(html).toContain('Исправить расхождения на площадках: 2');
     expect(html).toContain('&#60;b&#62;расхождения&#60;/b&#62;');
@@ -62,6 +69,121 @@ describe('agents page', () => {
         'yandex:1000001 /feed?limit=20',
       ]),
     );
+  });
+
+  it('opens on «Сегодня»; `?tab=` opens another tab, every tab is in the page', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    const open = (html: string) =>
+      [...html.matchAll(/data-panel="(\w+)"[^>]*>/g)]
+        .filter((m) => !m[0].includes(' hidden'))
+        .map((m) => m[1]);
+    let html = (await t.app.inject({ url: '/agents', cookies })).body;
+    expect(open(html)).toEqual(['today']);
+    expect(html).toContain('<title>Сегодня — агенты — Goldfish</title>');
+    expect(html).toContain('href="?tab=today" data-tab="today" aria-current="page"');
+    // The count of decisions waiting is on the tab.
+    expect(html).toMatch(/data-tab="today"[^>]*>Сегодня <span class="tabs__count"[^>]*>1<\/span>/);
+    for (const tab of ['team', 'property', 'settings']) {
+      expect(html).toContain(`data-panel="${tab}"`);
+      html = (await t.app.inject({ url: `/agents?tab=${tab}`, cookies })).body;
+      expect(open(html)).toEqual([tab]);
+      expect(html).toContain(`href="?tab=${tab}" data-tab="${tab}" aria-current="page"`);
+    }
+    html = (await t.app.inject({ url: '/agents?tab=nope', cookies })).body;
+    expect(open(html)).toEqual(['today']);
+  });
+
+  it('says on every tab who works, the wave, a pause, decisions and Telegram', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    let html = (await t.app.inject({ url: '/agents', cookies })).body;
+    const strip = /<ul class="statuses"[^>]*>(.*?)<\/ul>/s.exec(html)![1]!;
+    expect(strip).toContain('Работают 1 из 2 агентов');
+    expect(strip).toContain('Волна 1 из 3 · наблюдают');
+    expect(strip).toContain('href="/agents?tab=today#approvals-title">Ждут решения: 1');
+    expect(strip).toContain('href="/agents?tab=settings#telegram-title">Telegram не привязан');
+    expect(strip).not.toContain('Пауза');
+
+    t.fakes.hotel.settings.pause = { until: '2026-11-20', reason: 'ремонт' } as never;
+    t.fakes.hotel.telegramLinked = true;
+    t.fakes.approvals = [];
+    html = (await t.app.inject({ url: '/agents?tab=team', cookies })).body;
+    expect(html).toContain('Пауза до 20.11.2026 · ремонт');
+    expect(html).toContain('Telegram привязан');
+    expect(html).toContain('Решений не ждут');
+    expect(html).toContain('<b>На паузе до 20.11.2026</b> · ремонт');
+    expect(html).toContain(
+      `data-changes="${esc(JSON.stringify([{ op: 'pause', until: null }]))}" data-done="Пауза снята — агенты снова работают.">Снять паузу</button>`,
+    );
+    expect(html).toContain('Ничего не ждёт вашего решения');
+  });
+
+  it('an agent is switched by a switch; a wave asks with what switches on', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    let html = (await t.app.inject({ url: '/agents?tab=team', cookies })).body;
+    const sw = (agent: string) =>
+      new RegExp(`<button class="switch"[^>]*aria-labelledby="agent-${agent}-title"[^>]*>`).exec(
+        html,
+      )![0];
+    expect(sw('channels')).toContain('role="switch" aria-checked="true"');
+    expect(sw('channels')).toContain(
+      esc(JSON.stringify([{ op: 'agent', agent: 'channels', enabled: false }])),
+    );
+    expect(sw('manager')).toContain('aria-checked="false"');
+    expect(html).toContain('работает · 2 из 2 обязанности');
+    expect(html).toContain('выключен · 2 обязанности не работают');
+    // Levels of the working duties at a glance.
+    expect(html).toMatch(/Сам — 1<\/span>.*Согласование — 1<\/span>/s);
+
+    expect(html).toContain('<span class="chip chip--ok">сейчас</span>');
+    const wave2 = /data-act="wave" data-wave="2" data-confirm="([^"]*)"/.exec(html)![1]!;
+    expect(wave2).toContain('Перейти к волне 2 «Советуют»');
+    expect(wave2).toContain('У включённых агентов новых обязанностей нет');
+
+    // With the manager on, its duty of the next wave is named.
+    const manager = t.fakes.hotel.settings.agents[1]!;
+    manager.enabled = true;
+    html = (await t.app.inject({ url: '/agents?tab=team', cookies })).body;
+    expect(html).toContain('включится в волне 2');
+    expect(/data-act="wave" data-wave="2" data-confirm="([^"]*)"/.exec(html)![1]).toContain(
+      '• Управляющий: Недельный отчёт',
+    );
+  });
+
+  it('the reference is edited in fields, not JSON; what is not shown is kept', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    t.fakes.hotel.profile.systems = [
+      { id: 'ostrovok', url: 'https://extranet.ostrovok.ru/', commissionPercent: 15 },
+    ];
+    const html = (await t.app.inject({ url: '/agents?tab=property', cookies })).body;
+    expect(html).not.toContain('class="code"');
+    expect(html).not.toContain('(JSON)');
+    // Rooms: a row per category keeps the whole item; an empty row to add.
+    expect(html).toContain(
+      `<div class="list-edit__row" data-item="${esc(JSON.stringify({ id: 'std', name: 'Стандарт', count: 2 }))}">`,
+    );
+    expect(html).toContain(
+      '<input data-key="name" data-type="text" data-required type="text" value="Стандарт"',
+    );
+    expect(html).toContain('data-list="faq"');
+    expect(html).toContain('data-list="upsells"');
+    expect(html).toContain('data-list="competitors"');
+    expect(html).toContain('+ Добавить категорию');
+    // Systems: a checkbox each, connected ones ticked with their address and commission.
+    expect(html).toMatch(
+      /data-sys="ostrovok"[^>]*>\s*<label class="sys__check"><input type="checkbox" data-sys-on checked>/,
+    );
+    expect(html).toMatch(
+      /data-sys="avito"[^>]*>\s*<label class="sys__check"><input type="checkbox" data-sys-on>/,
+    );
+    expect(html).toContain('value="https://extranet.ostrovok.ru/"');
+    expect(html).toMatch(/data-key="commissionPercent"[^>]*value="15"/);
+    // Folded parts say what is in them.
+    expect(html).toContain('<span class="group__note">1 категория, номеров — 2</span>');
+    expect(html).toContain('<span class="group__note">подключено 1</span>');
   });
 
   it('when Goldfish is down the page says so', async () => {

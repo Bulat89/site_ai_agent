@@ -24,7 +24,7 @@ describe('agents page: folded team and the reference from a card', () => {
     const html = (await t.app.inject({ url: '/agents', cookies })).body;
     expect(html).toContain('<details class="agent__more" data-fold="agent:channels">');
     expect(html).not.toMatch(/class="agent__more"[^>]*\sopen/);
-    expect(html).toMatch(/работает · \d+ из \d+ обязанностей/);
+    expect(html).toMatch(/работает · \d+ из \d+ обязанност/);
     expect(html).toContain('data-fold-all="agent:"');
     // The landing folds what each agent does as well.
     const landing = (await t.app.inject({ url: '/' })).body;

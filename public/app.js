@@ -83,16 +83,99 @@ if (issueButton) {
 
 // ---------------------------------------------------------------- agents page
 // Every change goes to the site's /api/agents/* (same origin, session cookie), which forwards it
-// to the Goldfish server on the owner's behalf. After a change the page is reloaded from the server.
+// to the Goldfish server on the owner's behalf. After a change the page is reloaded from the server
+// on the same tab and at the same place, and says what changed at the bottom of the screen.
+
+// ------------------------------------------------ tabs
+// Every tab is in the page; a link to `?tab=…` (the tabs, the status line, «Первые шаги») shows
+// its tab without a reload. Without this script the same links open the tab from the server.
+
+const panels = [...document.querySelectorAll('[data-panel]')];
+const tabLinks = [...document.querySelectorAll('.tabs [data-tab]')];
+const tabsNav = document.querySelector('.tabs');
+const baseTitle = document.title.replace(/^[^—]+— /, '');
+
+function panelOf(el) {
+  const box = el && el.closest('[data-panel]');
+  return box ? box.getAttribute('data-panel') : null;
+}
+
+function showTab(tab, { anchor = '', push = false } = {}) {
+  const target = panels.find((p) => p.getAttribute('data-panel') === tab);
+  if (!target) return false;
+  for (const p of panels) p.hidden = p !== target;
+  for (const a of tabLinks) {
+    if (a.getAttribute('data-tab') === tab) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
+  const link = tabLinks.find((a) => a.getAttribute('data-tab') === tab);
+  if (link) document.title = `${link.firstChild.textContent.trim()} — ${baseTitle}`;
+  const url = `${location.pathname}?tab=${tab}`;
+  if (push) history.pushState({ tab }, '', url);
+  else history.replaceState({ tab }, '', url);
+  const el = anchor && document.getElementById(anchor);
+  if (el) {
+    const fold = el.closest('details');
+    if (fold) fold.open = true;
+    el.scrollIntoView({ block: 'start' });
+  } else if (tabsNav && tabsNav.getBoundingClientRect().top < 0) {
+    tabsNav.scrollIntoView({ block: 'start' });
+  }
+  return true;
+}
+
+if (panels.length) {
+  document.addEventListener('click', (event) => {
+    const a = event.target.closest('a[href]');
+    if (!a || event.defaultPrevented || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const url = new URL(a.href, location.href);
+    const tab = url.searchParams.get('tab');
+    if (url.origin !== location.origin || url.pathname !== location.pathname || !tab) return;
+    if (showTab(tab, { anchor: decodeURIComponent(url.hash.slice(1)), push: true }))
+      event.preventDefault();
+  });
+  addEventListener('popstate', () => {
+    showTab(new URLSearchParams(location.search).get('tab') || 'today');
+  });
+  // An old link to an anchor (`/agents#profile-title`) opens the tab the anchor is on.
+  const openHash = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const el = id && document.getElementById(id);
+    if (el && panelOf(el)) showTab(panelOf(el), { anchor: id });
+  };
+  addEventListener('hashchange', openHash);
+  if (location.hash) openHash();
+}
+
+// ------------------------------------------------ messages at the bottom of the screen
 
 const pageError = document.querySelector('[data-page-error]');
+const pageStatus = document.querySelector('[data-page-status]');
+let statusTimer = 0;
+
+function toast(box, message) {
+  box.querySelector('[data-toast-text]').textContent = message;
+  box.hidden = false;
+}
 
 function showError(message) {
   if (!pageError) return alert(message);
-  pageError.textContent = message;
-  pageError.hidden = false;
-  pageError.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  toast(pageError, message);
 }
+
+function showStatus(message) {
+  if (!pageStatus) return alert(message);
+  toast(pageStatus, message);
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => (pageStatus.hidden = true), 12000);
+}
+
+document.querySelectorAll('[data-toast-close]').forEach((b) =>
+  b.addEventListener('click', () => {
+    b.closest('.toast').hidden = true;
+  }),
+);
 
 async function agentsCall(method, path, body) {
   const res = await fetch(path, {
@@ -110,30 +193,20 @@ async function agentsCall(method, path, body) {
   return data;
 }
 
-async function changeSettings(changes) {
-  const data = await agentsCall('POST', '/api/agents/settings', { changes });
-  if (data.warnings && data.warnings.length)
-    alert(`Управляющий предупреждает:\n${data.warnings.join('\n')}`);
-  location.reload();
-}
-
-const pageStatus = document.querySelector('[data-page-status]');
 const FLASH_KEY = 'agents:flash';
+const SCROLL_KEY = 'agents:scroll';
 
-function showStatus(message) {
-  if (!pageStatus) return alert(message);
-  pageStatus.textContent = message;
-  pageStatus.hidden = false;
-  pageStatus.scrollIntoView({ block: 'center', behavior: 'smooth' });
-}
-
-// A message that survives the reload after a change (the page is re-rendered by the server).
+// What survives the reload after a change (the page is re-rendered by the server): the message
+// and the place on the page.
 try {
   const flash = sessionStorage.getItem(FLASH_KEY);
   if (flash) {
     sessionStorage.removeItem(FLASH_KEY);
     showStatus(flash);
   }
+  const at = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || 'null');
+  sessionStorage.removeItem(SCROLL_KEY);
+  if (at && at.url === location.pathname + location.search) scrollTo(0, at.y);
 } catch {
   // Storage blocked: the message is just not shown after the reload.
 }
@@ -141,10 +214,24 @@ try {
 function reloadWith(message) {
   try {
     sessionStorage.setItem(FLASH_KEY, message);
+    sessionStorage.setItem(
+      SCROLL_KEY,
+      JSON.stringify({ url: location.pathname + location.search, y: scrollY }),
+    );
   } catch {
     alert(message);
   }
   location.reload();
+}
+
+/** A change of settings; `done` says what changed, the manager's warnings follow it. */
+async function changeSettings(changes, done) {
+  const data = await agentsCall('POST', '/api/agents/settings', { changes });
+  const warnings =
+    data.warnings && data.warnings.length
+      ? ` Управляющий предупреждает: ${data.warnings.join(' ')}`
+      : '';
+  reloadWith(`${done || 'Сохранено.'}${warnings}`);
 }
 
 function guarded(fn) {
@@ -159,22 +246,72 @@ function guarded(fn) {
   };
 }
 
+// ------------------------------------------------ dialogs
+
+const permission = document.querySelector('[data-permission]');
+const confirmBox = document.querySelector('[data-confirm-dialog]');
+
+function ask(dialog, text, attr, fallback) {
+  if (!dialog || typeof dialog.showModal !== 'function') return Promise.resolve(fallback(text));
+  dialog.querySelector('.permission__text').textContent = text;
+  return new Promise((resolve) => {
+    const buttons = dialog.querySelectorAll(`[${attr}]`);
+    const done = (answer) => {
+      buttons.forEach((b) => b.removeEventListener('click', onClick));
+      dialog.removeEventListener('cancel', onCancel);
+      if (dialog.open) dialog.close();
+      resolve(answer);
+    };
+    const onClick = (event) => done(event.currentTarget.getAttribute(attr));
+    const onCancel = () => done('no');
+    buttons.forEach((b) => b.addEventListener('click', onClick));
+    dialog.addEventListener('cancel', onCancel);
+    dialog.showModal();
+    buttons[0].focus();
+  });
+}
+
+// «Выполнить»: a duty that is off is not run — the agent asks for permission first, and nothing
+// happens until the owner answers: once (the switches stay), always (switch on and run) or no.
+const askPermission = (text) =>
+  ask(permission, text, 'data-grant', (t) =>
+    confirm(`${t}\n\nРазрешить один раз?`) ? 'once' : 'no',
+  );
+
+/** Yes or no before a change with consequences (the wave, a new token). */
+const askConfirm = async (text) =>
+  (await ask(confirmBox, text, 'data-answer', (t) => (confirm(t) ? 'yes' : 'no'))) === 'yes';
+
+// ------------------------------------------------ team: agents, rights, waves, pause
+
 document.querySelectorAll('[data-act="settings"]').forEach((button) =>
   button.addEventListener(
     'click',
     guarded(async () => {
       button.disabled = true;
-      await changeSettings(JSON.parse(button.getAttribute('data-changes')));
+      await changeSettings(
+        JSON.parse(button.getAttribute('data-changes')),
+        button.getAttribute('data-done'),
+      );
     }),
   ),
 );
 
-document.querySelectorAll('select[data-act="level"]').forEach((select) =>
-  select.addEventListener(
-    'change',
+const LEVEL_TITLES = { self: 'Сам', rule: 'Правило', approval: 'Согласование', off: 'Выкл' };
+
+document.querySelectorAll('[data-act="level"]').forEach((button) =>
+  button.addEventListener(
+    'click',
     guarded(async () => {
-      const duty = select.getAttribute('data-duty');
-      const level = select.value;
+      if (button.getAttribute('aria-pressed') === 'true') return;
+      const duty = button.getAttribute('data-duty');
+      const level = button.getAttribute('data-level');
+      const group = button.closest('.seg');
+      const was = group.querySelector('[aria-pressed="true"]');
+      group.querySelectorAll('button').forEach((b) => {
+        b.setAttribute('aria-pressed', String(b === button));
+      });
+      group.setAttribute('aria-busy', 'true');
       // «Выкл» switches the duty off; any other level switches it on with these rights.
       const changes =
         level === 'off'
@@ -183,20 +320,77 @@ document.querySelectorAll('select[data-act="level"]').forEach((select) =>
               { op: 'duty', duty, enabled: true },
               { op: 'level', duty, level },
             ];
-      await changeSettings(changes);
+      try {
+        await changeSettings(
+          changes,
+          `«${button.getAttribute('data-title')}»: права — ${LEVEL_TITLES[level]}.`,
+        );
+      } catch (err) {
+        // Refused (above the ceiling, the server is down): the rights shown are the old ones.
+        group.querySelectorAll('button').forEach((b) => {
+          b.setAttribute('aria-pressed', String(b === was));
+        });
+        group.removeAttribute('aria-busy');
+        throw err;
+      }
     }),
   ),
 );
 
-// What to do next after a run status, in plain words (the guide explains every status).
+document.querySelectorAll('[data-act="platform"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      if (button.getAttribute('aria-pressed') === 'true') return;
+      const group = button.closest('.seg');
+      const was = group.querySelector('[aria-pressed="true"]');
+      const press = (on) =>
+        group.querySelectorAll('button').forEach((b) => {
+          b.setAttribute('aria-pressed', String(b === on));
+        });
+      press(button);
+      group.setAttribute('aria-busy', 'true');
+      try {
+        await changeSettings(
+          [
+            {
+              op: 'platform',
+              platform: button.getAttribute('data-platform'),
+              mode: button.getAttribute('data-mode'),
+            },
+          ],
+          `${button.getAttribute('data-title')}: ${button.textContent.toLowerCase()}.`,
+        );
+      } catch (err) {
+        press(was);
+        group.removeAttribute('aria-busy');
+        throw err;
+      }
+    }),
+  ),
+);
+
+document.querySelectorAll('[data-act="wave"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      if (!(await askConfirm(button.getAttribute('data-confirm')))) return;
+      button.disabled = true;
+      const wave = Number(button.getAttribute('data-wave'));
+      await changeSettings([{ op: 'wave', wave }], `Волна ${wave}: настройки агентов обновлены.`);
+    }),
+  ),
+);
+
+// What runs after a run status, in plain words (the guide explains every status).
 const STATUS_HINTS = [
-  [/^на согласовании/, 'Подтвердите его в разделе «Ждут решения» выше.'],
+  [/^на согласовании/, 'Подтвердите его на вкладке «Сегодня» → «Ждут решения» или в Telegram.'],
   [/расширение ещё ни разу/, 'Установите и подключите расширение — шаги в кабинете.'],
   [
     /нет подключённых систем/,
-    'Добавьте нужные площадки в эталон объекта (раздел «Системы и площадки»).',
+    'Отметьте нужные площадки в эталоне: «Объект» → «Системы и площадки».',
   ],
-  [/^пауза/, 'Изменения выполнятся, когда закончится пауза (раздел «Запуск»).'],
+  [/^пауза/, 'Изменения выполнятся, когда закончится пауза («Команда» → «Режим работы»).'],
   [/^задание запущено/, 'Агент работает в вашем браузере — держите его открытым.'],
   [/^ошибка/, 'Попробуйте позже. Если повторяется — напишите нам с текстом ошибки.'],
 ];
@@ -204,30 +398,6 @@ const STATUS_HINTS = [
 function statusHint(status) {
   const hit = STATUS_HINTS.find(([re]) => re.test(status || ''));
   return hit ? ` ${hit[1]}` : '';
-}
-
-// «Выполнить»: a duty that is off is not run — the agent asks for permission first, and nothing
-// happens until the owner answers: once (the switches stay), always (switch on and run) or no.
-const permission = document.querySelector('[data-permission]');
-
-function askPermission(text) {
-  if (!permission || typeof permission.showModal !== 'function')
-    return Promise.resolve(confirm(`${text}\n\nРазрешить один раз?`) ? 'once' : 'no');
-  permission.querySelector('[data-permission-text]').textContent = text;
-  return new Promise((resolve) => {
-    const buttons = permission.querySelectorAll('[data-grant]');
-    const done = (answer) => {
-      buttons.forEach((b) => b.removeEventListener('click', onClick));
-      permission.removeEventListener('cancel', onCancel);
-      if (permission.open) permission.close();
-      resolve(answer);
-    };
-    const onClick = (event) => done(event.currentTarget.getAttribute('data-grant'));
-    const onCancel = () => done('no');
-    buttons.forEach((b) => b.addEventListener('click', onClick));
-    permission.addEventListener('cancel', onCancel);
-    permission.showModal();
-  });
 }
 
 document.querySelectorAll('[data-act="run"]').forEach((button) =>
@@ -249,7 +419,7 @@ document.querySelectorAll('[data-act="run"]').forEach((button) =>
         data = await agentsCall('POST', path, { grant });
         const warnings =
           data.warnings && data.warnings.length
-            ? `\nУправляющий предупреждает: ${data.warnings.join(' ')}`
+            ? ` Управляющий предупреждает: ${data.warnings.join(' ')}`
             : '';
         if (grant === 'always')
           return reloadWith(`«${title}»: ${data.status}.${statusHint(data.status)}${warnings}`);
@@ -257,24 +427,6 @@ document.querySelectorAll('[data-act="run"]').forEach((button) =>
       showStatus(`«${title}»: ${data.status}.${statusHint(data.status)}`);
       button.disabled = false;
     }),
-  ),
-);
-
-document.querySelectorAll('select[data-act="platform"]').forEach((select) =>
-  select.addEventListener(
-    'change',
-    guarded(() =>
-      changeSettings([
-        { op: 'platform', platform: select.getAttribute('data-platform'), mode: select.value },
-      ]),
-    ),
-  ),
-);
-
-document.querySelectorAll('select[data-act="wave"]').forEach((select) =>
-  select.addEventListener(
-    'change',
-    guarded(() => changeSettings([{ op: 'wave', wave: Number(select.value) }])),
   ),
 );
 
@@ -286,10 +438,15 @@ if (pauseForm) {
       event.preventDefault();
       const until = pauseForm.elements.until.value;
       if (!until) throw new Error('Укажите дату, до которой пауза');
-      await changeSettings([{ op: 'pause', until, reason: pauseForm.elements.reason.value }]);
+      await changeSettings(
+        [{ op: 'pause', until, reason: pauseForm.elements.reason.value }],
+        `Пауза до ${until.split('-').reverse().join('.')}: записи на площадках и сообщения ждут.`,
+      );
     }),
   );
 }
+
+// ------------------------------------------------ settings: the manager, Telegram, webhooks
 
 const ownerForm = document.querySelector('form[data-form="owner"]');
 if (ownerForm) {
@@ -298,19 +455,24 @@ if (ownerForm) {
     guarded(async (event) => {
       event.preventDefault();
       const f = ownerForm.elements;
-      await changeSettings([
-        {
-          op: 'owner',
-          summaryTime: f.summaryTime.value,
-          quietFrom: f.quietFrom.value,
-          quietTo: f.quietTo.value,
-          urgentPerDay: Number(f.urgentPerDay.value),
-        },
-        { op: 'limits', reviewAutoMinStars: Number(f.reviewAutoMinStars.value) },
-      ]);
+      await changeSettings(
+        [
+          {
+            op: 'owner',
+            summaryTime: f.summaryTime.value,
+            quietFrom: f.quietFrom.value,
+            quietTo: f.quietTo.value,
+            urgentPerDay: Number(f.urgentPerDay.value),
+          },
+          { op: 'limits', reviewAutoMinStars: Number(f.reviewAutoMinStars.value) },
+        ],
+        'Настройки управляющего сохранены.',
+      );
     }),
   );
 }
+
+// ------------------------------------------------ today: approvals
 
 document.querySelectorAll('[data-act="approve"], [data-act="reject"]').forEach((button) =>
   button.addEventListener(
@@ -321,7 +483,7 @@ document.querySelectorAll('[data-act="approve"], [data-act="reject"]').forEach((
       await agentsCall('POST', `/api/agents/approvals/${button.getAttribute('data-id')}`, {
         decision,
       });
-      location.reload();
+      reloadWith(decision === 'approve' ? 'Согласовано — агент выполнит.' : 'Отклонено.');
     }),
   ),
 );
@@ -347,7 +509,7 @@ document.querySelectorAll('form[data-form="edit"]').forEach((form) =>
         decision: 'edit',
         text: form.elements.text.value,
       });
-      location.reload();
+      reloadWith('Изменено и согласовано.');
     }),
   ),
 );
@@ -380,7 +542,8 @@ if (hookButton) {
   hookButton.addEventListener(
     'click',
     guarded(async () => {
-      if (!confirm('Выпустить новый токен вебхуков? Старые адреса перестанут работать.')) return;
+      if (!(await askConfirm('Выпустить новый токен вебхуков? Старые адреса перестанут работать.')))
+        return;
       hookButton.disabled = true;
       const data = await agentsCall('POST', '/api/agents/hook-token');
       const base = hookButton.getAttribute('data-base');
@@ -399,17 +562,138 @@ document.addEventListener('click', async (event) => {
   if (input && input.value && (await copyText(input.value))) flashCopied(button);
 });
 
+// ------------------------------------------------ property: the reference
+// Lists (rooms, answers, extras, competitors) are rows of fields; each row keeps the item it was
+// made from, so fields the page does not show are kept. Systems are checkboxes with an address.
+
+document.addEventListener('click', (event) => {
+  const add = event.target.closest('[data-list-add]');
+  if (add) {
+    const box = add.closest('[data-list]');
+    const row = box.querySelector('template[data-list-template]').content.firstElementChild;
+    const copy = row.cloneNode(true);
+    box.querySelector('.list-edit__rows').appendChild(copy);
+    const first = copy.querySelector('input, textarea, select');
+    if (first) first.focus();
+    return;
+  }
+  const remove = event.target.closest('[data-list-remove]');
+  if (remove) remove.closest('.list-edit__row').remove();
+});
+
+const fieldLabel = (el) =>
+  (el.closest('label, .field')?.querySelector('.field__label')?.firstChild?.textContent || '')
+    .trim()
+    .replace(/\s+—.*$/, '');
+const groupTitle = (el) =>
+  el.closest('details.group')?.querySelector('summary span')?.textContent || 'Эталон';
+
+function failAt(el, message) {
+  const fold = el.closest('details');
+  if (fold) fold.open = true;
+  el.focus();
+  return new Error(message);
+}
+
+function collectList(box) {
+  const out = [];
+  for (const row of box.querySelectorAll('.list-edit__rows > .list-edit__row')) {
+    const fields = [...row.querySelectorAll('[data-key]')];
+    // A row left empty is not an item: an added row the owner did not fill.
+    if (fields.every((f) => f.tagName === 'SELECT' || !f.value.trim())) continue;
+    const item = JSON.parse(row.getAttribute('data-item') || '{}');
+    for (const f of fields) {
+      const key = f.getAttribute('data-key');
+      const value = f.value.trim();
+      if (!value && f.hasAttribute('data-required'))
+        throw failAt(f, `${groupTitle(f)}: заполните «${fieldLabel(f)}»`);
+      if (!value) delete item[key];
+      else if (f.getAttribute('data-type') === 'number') item[key] = Number(value);
+      else item[key] = value;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+const TRANSLIT = {
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'e',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'y',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'h',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'sch',
+  ы: 'y',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
+};
+
+/** A new room gets a short Latin code from its name; the codes of rooms never change. */
+function roomIds(rooms) {
+  const used = new Set(rooms.map((r) => r.id).filter(Boolean));
+  for (const room of rooms) {
+    if (room.id) continue;
+    const base =
+      [...String(room.name).toLowerCase()]
+        .map((c) => TRANSLIT[c] ?? c)
+        .join('')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 30) || 'room';
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    room.id = id;
+  }
+  return rooms;
+}
+
 const profileForm = document.querySelector('form[data-form="profile"]');
 if (profileForm) {
+  profileForm.noValidate = true;
   const error = profileForm.querySelector('[data-error]');
   profileForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     error.hidden = true;
     const f = profileForm.elements;
+    const button = profileForm.querySelector('button[type="submit"]');
     try {
+      for (const input of profileForm.querySelectorAll('input')) {
+        // A system that is not ticked is not sent: what is typed in it does not matter.
+        const sys = input.closest('[data-sys]');
+        if (sys && !sys.querySelector('[data-sys-on]').checked) continue;
+        if (!input.checkValidity())
+          throw failAt(
+            input,
+            `${groupTitle(input)}: проверьте «${fieldLabel(input) || input.getAttribute('aria-label') || 'поле'}» — ${input.validationMessage}`,
+          );
+      }
       const profile = JSON.parse(f.base.value);
       for (const key of ['name', 'address', 'phone', 'checkIn', 'checkOut', 'directions'])
         profile[key] = f[key].value.trim();
+      if (!profile.name) throw failAt(f.name, 'Основное: укажите название объекта');
       if (f.website.value.trim()) profile.website = f.website.value.trim();
       else delete profile.website;
       profile.amenities = f.amenities.value
@@ -425,21 +709,28 @@ if (profileForm) {
       };
       if (f.adsMonthlyBudget.value) profile.adsMonthlyBudget = Number(f.adsMonthlyBudget.value);
       else delete profile.adsMonthlyBudget;
-      for (const key of ['rooms', 'faq', 'systems', 'competitors', 'upsells']) {
-        const raw = f[key].value.trim();
-        try {
-          profile[key] = raw ? JSON.parse(raw) : [];
-        } catch {
-          throw new Error(
-            `Раздел «${f[key].closest('label').querySelector('.field__label').textContent}»: неверный JSON`,
-          );
+      for (const box of profileForm.querySelectorAll('[data-list]'))
+        profile[box.getAttribute('data-list')] = collectList(box);
+      profile.rooms = roomIds(profile.rooms || []);
+      profile.systems = [];
+      for (const sys of profileForm.querySelectorAll('[data-sys]')) {
+        if (!sys.querySelector('[data-sys-on]').checked) continue;
+        const item = JSON.parse(sys.getAttribute('data-item'));
+        for (const f of sys.querySelectorAll('[data-key]')) {
+          const key = f.getAttribute('data-key');
+          const value = f.value.trim();
+          if (!value) delete item[key];
+          else item[key] = f.getAttribute('data-type') === 'number' ? Number(value) : value;
         }
+        profile.systems.push(item);
       }
+      button.disabled = true;
       await agentsCall('PUT', '/api/agents/profile', profile);
-      location.reload();
+      reloadWith('Эталон сохранён — агенты уже работают по нему.');
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;
+      button.disabled = false;
     }
   });
 }
@@ -739,7 +1030,7 @@ document.querySelectorAll('[data-act="listing-publish"]').forEach((button) =>
       const platform = encodeURIComponent(button.getAttribute('data-platform'));
       await agentsCall('POST', `/api/agents/listings/${id}/${platform}/publish`);
       reloadWith(
-        `Размещение на площадке ${button.getAttribute('data-title')} — на согласовании: согласуйте его в списке выше или в Telegram.`,
+        `Размещение на площадке ${button.getAttribute('data-title')} — на согласовании: согласуйте его на вкладке «Сегодня» или в Telegram.`,
       );
     }),
   ),
