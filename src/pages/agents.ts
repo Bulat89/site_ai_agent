@@ -1071,7 +1071,7 @@ ${searching ? '' : `      <div class="row row--tight verdicts">${VERDICTS.map(([
       .join('; ');
     return `<div class="import import--wait" data-poll-url="/api/agents/competitors" data-poll-state="${esc(pollState(c.platforms))}" role="status">
   <span class="spinner" aria-hidden="true"></span>
-  <div><b>Агент ищет конкурентов: ${where}</b><p class="hint">Найденное показываю сразу; кто из них прямой конкурент, агент решит, когда прочитаны все площадки. Страница обновится сама.</p></div>
+  <div><b>Агент ищет конкурентов: ${where}</b><p class="hint">Обычно около 5 минут. Кто из найденных прямой конкурент, агент решит, когда поиск закончится. Страница обновится сама.</p></div>
 </div>
 ${c.candidates.length ? `<p class="hint">Пока найдено ${c.found}, самые похожие:</p><ol class="competitors">\n${c.candidates.map(item).join('\n')}\n  </ol>` : ''}`;
   }
