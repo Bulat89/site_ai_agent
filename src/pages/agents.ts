@@ -23,6 +23,9 @@ export interface HotelView {
   hookConfigured: boolean;
   telegramBot?: boolean;
   settings: {
+    /** Autonomy of the manager, 1–4, and what each level means (older servers send neither). */
+    autonomy?: number;
+    autonomyLevels?: AutonomyLevel[];
     wave: number;
     pause: { until: string; reason: string } | null;
     owner: { quietFrom: string; quietTo: string; urgentPerDay: number; summaryTime: string };
@@ -59,6 +62,14 @@ export interface HotelView {
 }
 
 type Level = 'self' | 'rule' | 'approval' | 'off';
+
+/** A level of the manager's autonomy, in the server's words. */
+export interface AutonomyLevel {
+  level: number;
+  title: string;
+  short: string;
+  rules: string[];
+}
 type Agent = HotelView['settings']['agents'][number];
 type Duty = Agent['duties'][number];
 
@@ -116,6 +127,13 @@ export interface DeskView {
     urgent: boolean;
     text: string | null;
     editable: boolean;
+    /** A non-standard situation the manager hands over (older servers do not send it). */
+    escalation?: {
+      what: string;
+      consequences: string;
+      recommendation: string;
+      held: string | null;
+    } | null;
     createdAt: string;
     expiresAt: string;
   }>;
@@ -366,6 +384,11 @@ export function statusStrip(s: Pick<AgentsState, 'hotel' | 'desk' | 'bots'>): st
     items.push(
       `<a class="status status--warn" href="${agentsHref('launch-title')}">Пауза до ${esc(day(set.pause.until))}${set.pause.reason ? ` · ${esc(set.pause.reason)}` : ''}</a>`,
     );
+  const level = autonomyOf(h);
+  if (level)
+    items.push(
+      `<a class="status" href="${agentsHref('autonomy-title')}">Уровень ${level.level} из 4 · ${esc(level.title.toLowerCase())}</a>`,
+    );
   items.push(
     `<a class="status" href="${agentsHref('launch-title')}">Волна ${set.wave} из 3 · ${esc(WAVES[set.wave - 1]?.name.toLowerCase() ?? '')}</a>`,
   );
@@ -590,7 +613,14 @@ function approvalsBlock(list: DeskView['approvals']): string {
       ) => `<article class="approval${a.urgent ? ' approval--urgent' : ''}" data-approval="${esc(a.id)}">
   <div class="approval__head"><span class="agent-icon agent-icon--sm" aria-hidden="true">${icon(a.agent)}</span><p class="approval__agent">${esc(a.agentTitle)} · ${esc(when(a.createdAt))}</p>${a.urgent ? '<span class="chip chip--bad">срочно</span>' : ''}</div>
   <h3>${esc(a.title)}</h3>
-  <p class="approval__reason"><span class="approval__label">Почему:</span> ${esc(a.reason)}</p>
+  ${
+    a.escalation
+      ? `<p class="approval__reason"><span class="approval__label">Что произошло:</span> ${esc(a.escalation.what)}</p>
+  <p class="approval__reason"><span class="approval__label">Чем грозит:</span> ${esc(a.escalation.consequences)}</p>
+  <p class="approval__reason"><span class="approval__label">Что рекомендую:</span> ${esc(a.escalation.recommendation)}</p>
+  ${a.escalation.held ? `<p class="approval__reason"><span class="approval__label">До вашего решения приостановлено:</span> ${esc(a.escalation.held)}</p>` : ''}`
+      : `<p class="approval__reason"><span class="approval__label">Почему:</span> ${esc(a.reason)}</p>`
+  }
   ${a.cost ? `<p class="approval__cost"><span class="approval__label">Сколько стоит:</span> <b>${esc(a.cost)}</b></p>` : ''}
   ${a.text ? `<pre class="approval__text">${esc(a.text)}</pre>` : ''}
   <div class="row approval__actions">
@@ -681,6 +711,40 @@ function waveConfirm(h: HotelView, target: number): string {
   return `${head}\n\n${off.length ? `Выключатся обязанности поздних волн (кроме включённых вами вручную):\n${off.join('\n')}` : 'Обязанности поздних волн сейчас не работают — ничего не выключится.'}`;
 }
 
+/** The level of autonomy the property has now, when the server tells it. */
+function autonomyOf(h: HotelView): AutonomyLevel | undefined {
+  const levels = h.settings.autonomyLevels;
+  return levels?.find((l) => l.level === h.settings.autonomy);
+}
+
+/**
+ * The manager's autonomy, 1–4: the four levels with what the manager does on each; another level
+ * is chosen with a confirmation that says what changes.
+ */
+function autonomyBlock(h: HotelView): string {
+  const levels = h.settings.autonomyLevels;
+  const current = h.settings.autonomy;
+  if (!levels?.length || !current) return '';
+  const items = levels.map((l) => {
+    const state = l.level === current ? 'current' : 'next';
+    const confirm = `Уровень автономности ${l.level} — «${l.title}»?\n\n${l.rules.map((r) => `• ${r}`).join('\n')}`;
+    return `<li class="wave wave--${state}">
+        <span class="wave__num" aria-hidden="true">${l.level}</span>
+        <span class="wave__text"><b>${esc(l.title)}</b><span class="hint">${esc(l.short)}</span></span>
+        ${l.level === current ? '<span class="chip chip--ok">сейчас</span>' : `<button class="btn btn--ghost btn--xs" type="button" data-act="autonomy" data-level="${l.level}" data-title="${esc(l.title)}" data-confirm="${esc(confirm)}">Выбрать</button>`}
+      </li>`;
+  });
+  const now = levels.find((l) => l.level === current);
+  return `<div class="autonomy">
+    <h3 id="autonomy-title">Уровень автономности управляющего</h3>
+    <p class="hint hint--top">Сколько управляющий делает без вас — от полностью ручного управления до полной автономности. Права обязанностей могут сделать агентов строже, но не дадут больше, чем позволяет уровень. ${helpLink('autonomy', 'Что значат уровни?')}</p>
+    <ol class="waves waves--autonomy">
+      ${items.join('\n      ')}
+    </ol>
+    ${now ? `<ul class="list autonomy__rules" aria-label="Что делает управляющий сейчас">${now.rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+  </div>`;
+}
+
 function launchBlock(h: HotelView): string {
   const set = h.settings;
   const steps = WAVES.map((w, i) => {
@@ -704,6 +768,7 @@ function launchBlock(h: HotelView): string {
     <ol class="waves">
       ${steps}
     </ol>
+    ${autonomyBlock(h)}
     ${pause}
     <details class="pause-form">
       <summary>${set.pause ? 'Изменить паузу' : 'Поставить на паузу — ремонт, закрытый сезон'}</summary>
