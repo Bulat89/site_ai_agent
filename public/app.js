@@ -823,7 +823,7 @@ if (profileForm) {
 }
 
 // ---------------------------------------------------------------- guide
-// Search filters the questions as you type; a link to /help#<id> opens that answer.
+// Search filters the questions as you type; a link to /help#<id> (or /#faq-…) opens that answer.
 
 const guideSearch = document.querySelector('[data-guide-search]');
 
@@ -857,10 +857,11 @@ if (guideSearch) {
     for (const t of topics) t.hidden = !t.querySelector('.guide-item:not([hidden])');
     empty.hidden = shown > 0;
   });
-
-  window.addEventListener('hashchange', openFromHash);
-  openFromHash();
 }
+
+// The landing's questions open the same way: /#faq-passwords.
+window.addEventListener('hashchange', openFromHash);
+openFromHash();
 
 // ---------------------------------------------------------------- folded agent cards
 // Duties of every agent are folded by default. The page remembers which cards the owner opened,
