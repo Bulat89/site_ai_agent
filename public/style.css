@@ -2966,3 +2966,80 @@ code.ph {
   flex: 0 1 35%;
   min-width: 0;
 }
+
+/* ---------------------------------------------------------------- bots in the messengers */
+
+.bots {
+  margin-bottom: 20px;
+}
+.bots__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 16px 0 12px;
+}
+.bot-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: center;
+}
+/* The code stays dark on white in both themes: scanners read it so. */
+.bot-qr__code {
+  display: block;
+  width: 168px;
+  height: 168px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.bot-qr__code--empty {
+  display: grid;
+  place-items: center;
+  color: #5f6573;
+  font-size: 40px;
+}
+.qr {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.bot-qr__caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bot-qr__state {
+  color: var(--muted);
+  font-size: 14px;
+}
+.bot-qr__state--on {
+  color: var(--ok);
+}
+.bot-qr__caption .hint {
+  margin: 0;
+}
+.bot-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.bot-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--ok-soft);
+}

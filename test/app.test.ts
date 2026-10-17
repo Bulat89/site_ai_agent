@@ -2,7 +2,16 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PUBLIC_URL, sessionUser, signIn, startApp, testConfig, type TestApp } from './helpers.js';
+import {
+  BOTS_TOKEN,
+  BOTS_URL,
+  PUBLIC_URL,
+  sessionUser,
+  signIn,
+  startApp,
+  testConfig,
+  type TestApp,
+} from './helpers.js';
 
 const origin = { origin: PUBLIC_URL };
 
@@ -86,6 +95,14 @@ describe('landing page', () => {
       expect(kept, `/#${id}`).toContain(id);
     expect(kept).toContain('security');
     expect(kept).toContain('data');
+  });
+
+  it('names MAX and WhatsApp on the landing only with a bots server', async () => {
+    t = await startApp();
+    expect((await t.app.inject('/')).body).not.toContain('MAX или WhatsApp');
+    await t.app.close();
+    t = await startApp({ BOTS_URL, BOTS_API_TOKEN: BOTS_TOKEN });
+    expect((await t.app.inject('/')).body).toContain('Telegram, MAX или WhatsApp');
   });
 
   it('explains a failed sign-in', async () => {

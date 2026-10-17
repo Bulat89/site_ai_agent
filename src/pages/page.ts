@@ -1,6 +1,7 @@
 import type { AccessState } from '../access.js';
 import type { AssetUrls } from '../static.js';
 import type { UserRecord } from '../store/types.js';
+import { botsBlock, type BotsState } from './bots.js';
 
 export type Notice = 'login_denied' | 'login_expired' | 'login_error' | 'download_unavailable';
 
@@ -11,12 +12,16 @@ export interface View {
   supportEmail?: string | undefined;
   /** How long a sign-in lasts (SESSION_DAYS), told on the landing. */
   sessionDays?: number | undefined;
+  /** The site links MAX and WhatsApp too, not only Telegram (a bots server, BOTS_URL). */
+  messengers?: boolean | undefined;
 }
 
 interface PageState extends View {
   user: UserRecord | null;
   access: AccessState | null;
   notice: Notice | null;
+  /** The bots in the messengers: undefined when the site has no bots server (BOTS_URL). */
+  bots?: BotsState | undefined;
 }
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -346,7 +351,7 @@ const FLOW: Array<{ icon: keyof typeof MARKS; title: string; text: string }> = [
   { icon: 'hotel', title: 'PMS и площадки', text: 'Открыты с вашими входами — пароли не нужны' },
 ];
 
-const HOW = `<section class="how wrap" id="how" aria-labelledby="how-title">
+const how = (v: View) => `<section class="how wrap" id="how" aria-labelledby="how-title">
   <h2 id="how-title" class="section-title">Как это работает</h2>
   <p class="section-lead">Агенты думают на сервере Goldfish, а действуют в вашем браузере — там, где вы уже вошли в PMS и кабинеты площадок. Поэтому им не нужны ваши пароли.</p>
   <ol class="flow">
@@ -371,7 +376,7 @@ ${FLOW.map(
         <li>Компьютер с Chrome 116+, Яндекс Браузером или Edge и расширением Goldfish.</li>
         <li>Вход в PMS и кабинеты площадок в этом браузере — агенты работают в ваших сессиях.</li>
         <li>Открытый браузер. Пока компьютер выключен, задания ждут, а о сообщениях гостей агент узнаёт из пересланных писем площадок и вебхуков PMS.</li>
-        <li>Telegram — для сводки и согласований. Без него всё видно на сайте.</li>
+        <li>${v.messengers ? 'Telegram, MAX или WhatsApp' : 'Telegram'} — для сводки и согласований. Без мессенджера всё видно на сайте.</li>
       </ul>
     </div>
     <div>
@@ -631,12 +636,12 @@ ${stored(v.sessionDays ?? 30)
 </section>`;
 }
 
-const START = `<section class="how wrap" id="start" aria-labelledby="start-title">
+const start = (v: View) => `<section class="how wrap" id="start" aria-labelledby="start-title">
   <h2 id="start-title" class="section-title">Как начать</h2>
   <ol class="steps">
     <li><b>Войдите</b> через Яндекс ID и установите расширение в браузер, где открыты ваши PMS и кабинеты площадок.</li>
     <li><b>Заполните эталон объекта</b>: пришлите ссылку на карточку на Авито или Яндекс Путешествиях — агент перенесёт номера, цены, правила и удобства, вы проверите и примените.</li>
-    <li><b>Включите агентов</b> одной кнопкой и привяжите Telegram — первая сводка придёт утром.</li>
+    <li><b>Включите агентов</b> одной кнопкой и привяжите ${v.messengers ? 'мессенджер' : 'Telegram'} — первая сводка придёт утром.</li>
   </ol>
 </section>`;
 
@@ -724,13 +729,13 @@ ${ASSURE.map((a) => `      <li>${MARKS.check}${a}</li>`).join('\n')}
   ${TELEGRAM}
 </section>
 ${WHY_SECTION}
-${HOW}
+${how(v)}
 ${TEAM}
 ${CONTROL}
 ${WAVES}
 ${SECURITY}
 ${dataSection(v)}
-${START}
+${start(v)}
 ${faqSection(v)}
 <section class="wrap final" aria-labelledby="final-title">
   <div class="final__box">
@@ -741,7 +746,21 @@ ${faqSection(v)}
 </section>`;
 }
 
-function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): string {
+/** Step 4 of the cabinet: QR codes that link the owner's Telegram, MAX or WhatsApp. */
+function botsCard(bots: BotsState): string {
+  return `<article class="card card--wide" id="bots" aria-labelledby="bots-title">
+    <div class="card__head"><h2 id="bots-title"><span class="num">4</span>Управляйте агентами из мессенджера</h2>${helpLink('bots', 'Что умеет бот?')}</div>
+    <p>Привяжите Telegram, MAX или WhatsApp: согласовывайте решения агентов, поручайте им задачи, включайте и выключайте агентов прямо из чата. Туда же придут утренняя сводка и срочное.</p>
+    ${botsBlock(bots, { unlink: false, refreshHref: '/#bots', agentsHref: agentsHref('telegram-title') })}
+  </article>`;
+}
+
+function cabinet(
+  user: UserRecord,
+  access: AccessState,
+  goldfishUrl: string,
+  bots?: BotsState,
+): string {
   const first = (user.name ?? user.login ?? '').split(/\s+/)[0] ?? '';
   if (!access.allowed)
     return `<section class="hero hero--user wrap">
@@ -758,7 +777,7 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   <div class="hero__text">
     <p class="eyebrow eyebrow--ok"><span class="dot"></span>${esc(access.label)} · доступ открыт</p>
     <h1>Здравствуйте${first ? `, ${esc(first)}` : ''}!</h1>
-    <p class="lead">Три шага — и команда агентов работает на ваш объект.</p>
+    <p class="lead">${bots ? 'Четыре шага' : 'Три шага'} — и команда агентов работает на ваш объект.</p>
   </div>
 </section>
 <section class="cabinet wrap" aria-label="Установка и подключение">
@@ -791,12 +810,13 @@ function cabinet(user: UserRecord, access: AccessState, goldfishUrl: string): st
   </article>
   <article class="card card--wide">
     <h2><span class="num">3</span>Настройте агентов объекта</h2>
-    <p>Заполните эталон объекта (можно по ссылке на карточку Авито или Яндекс Путешествий), включите агентов и привяжите Telegram — управляющий пришлёт сводку и согласования.</p>
+    <p>Заполните эталон объекта (можно по ссылке на карточку Авито или Яндекс Путешествий), включите агентов и привяжите ${bots ? 'мессенджер' : 'Telegram'} — управляющий пришлёт сводку и согласования.</p>
     <div class="row">
       <a class="btn btn--accent" href="/agents">Перейти к агентам</a>
       <a class="btn btn--ghost" href="/help">Инструкция по всем сценариям</a>
     </div>
   </article>
+  ${bots ? botsCard(bots) : ''}
 </section>`;
 }
 
@@ -804,7 +824,7 @@ export function renderPage(s: PageState): string {
   // Signed in, the cabinet comes first; the team, security and data stay on the page for reference.
   const main =
     s.user && s.access
-      ? `${cabinet(s.user, s.access, s.goldfishUrl)}
+      ? `${cabinet(s.user, s.access, s.goldfishUrl, s.bots)}
 ${TEAM}
 ${SECURITY}
 ${dataSection(s)}`

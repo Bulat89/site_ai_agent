@@ -537,6 +537,23 @@ if (telegramButton) {
   );
 }
 
+// A chat linked to a bot in Telegram, MAX or WhatsApp: unlinked through the site.
+document.querySelectorAll('[data-act="bot-unlink"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      if (!(await askConfirm('Отвязать этот чат? Сообщения управляющего туда больше не придут.')))
+        return;
+      button.disabled = true;
+      await agentsCall('POST', '/api/bots/unlink', {
+        channel: button.getAttribute('data-channel'),
+        chatId: button.getAttribute('data-chat'),
+      });
+      reloadWith('Чат отвязан.');
+    }),
+  ),
+);
+
 const hookButton = document.querySelector('[data-act="hook-token"]');
 if (hookButton) {
   hookButton.addEventListener(
