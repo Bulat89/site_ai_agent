@@ -472,47 +472,117 @@ if (ownerForm) {
   );
 }
 
-// ------------------------------------------------ today: approvals
+// ------------------------------------------------ today: approvals, live
 
-document.querySelectorAll('[data-act="approve"], [data-act="reject"]').forEach((button) =>
-  button.addEventListener(
-    'click',
-    guarded(async () => {
-      button.disabled = true;
-      const decision = button.getAttribute('data-act');
-      await agentsCall('POST', `/api/agents/approvals/${button.getAttribute('data-id')}`, {
-        decision,
-      });
-      reloadWith(decision === 'approve' ? 'Согласовано — агент выполнит.' : 'Отклонено.');
-    }),
-  ),
-);
+// «Сегодня» is the same desk the extension and the messenger bots show. While it is open it asks
+// for itself again and puts the new one in place when something changed — a decision taken in
+// Telegram shows here without a reload. Not while the owner is editing a text or deciding.
 
-document.querySelectorAll('[data-act="edit-open"]').forEach((button) =>
-  button.addEventListener('click', () => {
-    const form = document.querySelector(
-      `form[data-form="edit"][data-id="${button.getAttribute('data-id')}"]`,
+const todayPanel = document.querySelector('[data-panel="today"]');
+const TODAY_EVERY_MS = 20_000;
+let todayBusy = false;
+let todayTimer = 0;
+
+function editingToday() {
+  return (
+    !!todayPanel &&
+    (!!todayPanel.querySelector('form[data-form="edit"]:not([hidden])') ||
+      todayPanel.contains(document.activeElement && document.activeElement.closest('textarea')))
+  );
+}
+
+async function refreshToday({ force = false } = {}) {
+  if (!todayPanel || todayBusy || (!force && editingToday())) return;
+  todayBusy = true;
+  try {
+    const res = await fetch('/api/agents/today', { credentials: 'same-origin' });
+    if (res.status === 401) return;
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!force && data.rev && data.rev === todayPanel.getAttribute('data-rev')) return;
+    todayPanel.innerHTML = data.today;
+    if (data.rev) todayPanel.setAttribute('data-rev', data.rev);
+    const strip = document.querySelector('[data-statuses]');
+    if (strip && data.strip) strip.outerHTML = data.strip;
+    const tab = document.querySelector('.tabs [data-tab="today"]');
+    if (tab) {
+      const old = tab.querySelector('.tabs__count');
+      if (old) old.remove();
+      if (data.count) tab.insertAdjacentHTML('beforeend', data.count);
+    }
+  } catch {
+    // No connection right now: the next tick asks again.
+  } finally {
+    todayBusy = false;
+  }
+}
+
+function scheduleToday() {
+  clearTimeout(todayTimer);
+  if (!todayPanel || document.visibilityState !== 'visible') return;
+  todayTimer = setTimeout(async () => {
+    await refreshToday();
+    scheduleToday();
+  }, TODAY_EVERY_MS);
+}
+
+if (todayPanel) {
+  scheduleToday();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshToday().finally(scheduleToday);
+    else clearTimeout(todayTimer);
+  });
+}
+
+/** The card fades while the decision goes; then «Сегодня» is redrawn from the desk. */
+async function decide(id, body, card, done) {
+  if (card) card.classList.add('approval--busy');
+  card?.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  try {
+    const data = await agentsCall('POST', `/api/agents/approvals/${encodeURIComponent(id)}`, body);
+    showStatus(
+      `${done}: «${data.title || 'согласование'}».${data.comment ? ` ${data.comment}` : ''}`,
     );
+  } catch (err) {
+    if (card) card.classList.remove('approval--busy');
+    card?.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    showError(err.message);
+  }
+  await refreshToday({ force: true });
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest(
+    '[data-act="approve"], [data-act="reject"], [data-act="edit-open"]',
+  );
+  if (!button) return;
+  const id = button.getAttribute('data-id');
+  const act = button.getAttribute('data-act');
+  const card = button.closest('[data-approval]');
+  if (act === 'edit-open') {
+    const form = card && card.querySelector('form[data-form="edit"]');
     if (form) {
       form.hidden = !form.hidden;
       if (!form.hidden) form.elements.text.focus();
     }
-  }),
-);
+    return;
+  }
+  decide(id, { decision: act }, card, act === 'approve' ? 'Согласовано' : 'Отклонено');
+});
 
-document.querySelectorAll('form[data-form="edit"]').forEach((form) =>
-  form.addEventListener(
-    'submit',
-    guarded(async (event) => {
-      event.preventDefault();
-      await agentsCall('POST', `/api/agents/approvals/${form.getAttribute('data-id')}`, {
-        decision: 'edit',
-        text: form.elements.text.value,
-      });
-      reloadWith('Изменено и согласовано.');
-    }),
-  ),
-);
+document.addEventListener('submit', (event) => {
+  const form = event.target.closest('form[data-form="edit"]');
+  if (!form) return;
+  event.preventDefault();
+  const text = form.elements.text.value.trim();
+  if (!text) return showError('Напишите новый текст.');
+  decide(
+    form.getAttribute('data-id'),
+    { decision: 'edit', text },
+    form.closest('[data-approval]'),
+    'Изменено и согласовано',
+  );
+});
 
 const telegramButton = document.querySelector('[data-act="telegram"]');
 if (telegramButton) {

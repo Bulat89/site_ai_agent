@@ -384,6 +384,11 @@ export class Fakes {
       createdAt: '2026-10-08T07:00:00.000Z',
     },
   ];
+  /** GET …/hotel/manager: false — an older Goldfish without the desk (404). */
+  deskSupported = true;
+  /** Decisions taken, for «Решено недавно». */
+  decided: Array<Record<string, unknown>> = [];
+  deskRev = 'rev_1';
   // Bots server (tg_goldfish)
   /** Chats linked to bots: `owner` is `<clientId>/<userId>`. */
   readonly botLinks: Array<{
@@ -415,6 +420,54 @@ export class Fakes {
     if (url.host === 'bots.test') return this.bots(method, url, headers);
     throw new TypeError(`fetch failed: ${url}`);
   };
+
+  /** The desk the Goldfish server would give for the fake's approvals. */
+  desk() {
+    const titles = new Map(this.hotel.settings.agents.map((a) => [a.id, a.title]));
+    return {
+      rev: this.deskRev,
+      property: { name: this.hotel.profile.name, timezone: 'Europe/Moscow' },
+      status: {
+        agentsOn: this.hotel.settings.agents.filter((a) => a.enabled).length,
+        agentsTotal: this.hotel.settings.agents.length,
+        wave: this.hotel.settings.wave,
+        waveTitle: 'Наблюдают',
+        pause: null,
+        pending: this.approvals.length,
+        urgent: this.approvals.filter((a) => a.urgent).length,
+        line: '',
+      },
+      approvals: this.approvals.map((a) => ({
+        ...a,
+        agentTitle: titles.get(a.agent) ?? a.agent,
+        duty: 'channels.fix',
+        text: a.action.text ?? null,
+        editable: a.action.kind !== 'none',
+        remindedAt: null,
+        expiresAt: new Date(Date.parse(a.createdAt) + 72 * 3_600_000).toISOString(),
+      })),
+      decided: this.decided,
+      feed: [
+        {
+          id: 'out_1',
+          kind: 'summary',
+          kindTitle: 'Сводка',
+          mark: '☀️',
+          text: 'Доброе утро! Сегодня заездов — 1.',
+          approvalId: null,
+          decided: null,
+          sentAt: '2026-10-08T06:00:00.000Z',
+          folded: false,
+          createdAt: '2026-10-08T06:00:00.000Z',
+        },
+      ],
+      kpi: [
+        { id: 'next30', label: 'Загрузка вперёд', value: '48%', sub: 'на 30 дней' },
+        { id: 'adr', label: 'ADR', value: '5 200 ₽', sub: 'средняя цена ночи' },
+        { id: 'rating', label: 'Рейтинг', value: '4,7', sub: 'на площадках' },
+      ],
+    };
+  }
 
   private bots(method: string, url: URL, headers: Headers): Response {
     if (this.botsDown) throw new TypeError('fetch failed: connect ECONNREFUSED');
@@ -547,6 +600,8 @@ export class Fakes {
         body,
       });
       if (method === 'GET' && sub === '') return json(this.hotel);
+      if (method === 'GET' && sub === '/manager')
+        return this.deskSupported ? json(this.desk()) : json({ error: 'not_found' }, 404);
       if (method === 'GET' && sub === '/approvals') return json(this.approvals);
       if (method === 'GET' && sub === '/kpi')
         return json({

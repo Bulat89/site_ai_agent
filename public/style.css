@@ -1142,6 +1142,90 @@ h1 {
   font-size: 12px;
 }
 
+/* The desk: the same card, the same words as in the extension and the bots. */
+.status--bad {
+  color: #fff;
+  background: var(--bad);
+  border-color: var(--bad);
+}
+.tabs__count--urgent {
+  background: var(--bad);
+  color: #fff;
+}
+.approval {
+  transition: opacity 0.2s;
+}
+.approval--busy {
+  opacity: 0.5;
+}
+.approval__label {
+  color: var(--muted);
+}
+.approval__reason {
+  color: var(--text);
+}
+.approval__actions {
+  align-items: center;
+}
+.approval__left {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn--danger {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+}
+.btn--danger:hover {
+  background: var(--bad-soft);
+}
+.decided {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.decided > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+.decided__list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.decided__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.decided__item > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.decided__item .hint {
+  margin: 0;
+}
+.decided__mark {
+  flex: none;
+  width: 22px;
+  text-align: center;
+}
+.chip--urgent {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: color-mix(in srgb, var(--bad) 30%, var(--line));
+}
+.chip--approval,
+.chip--reminder {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
 /* ---------------------------------------------------------------- agents: «Команда» */
 
 .waves {

@@ -92,12 +92,62 @@ export interface FeedItem {
   createdAt: string;
 }
 
+/**
+ * «Пульт управляющего» (GET …/hotel/manager): the state line, the approvals waiting as cards, the
+ * latest decisions with where they were taken, the manager's messages and the numbers — the same
+ * the side panel of the extension and the messenger bots show, with the server's words.
+ */
+export interface DeskView {
+  rev: string;
+  status: {
+    agentsOn: number;
+    agentsTotal: number;
+    wave: number;
+    pending: number;
+    urgent: number;
+  };
+  approvals: Array<{
+    id: string;
+    agent: string;
+    agentTitle: string;
+    title: string;
+    reason: string;
+    cost: string | null;
+    urgent: boolean;
+    text: string | null;
+    editable: boolean;
+    createdAt: string;
+    expiresAt: string;
+  }>;
+  decided: Array<{
+    id: string;
+    agent: string;
+    agentTitle: string;
+    title: string;
+    status: 'approved' | 'rejected' | 'expired';
+    outcome: string;
+    mark: string;
+    comment: string | null;
+    decidedAt: string;
+  }>;
+  feed: Array<{
+    id: string;
+    kind: string;
+    kindTitle: string;
+    mark: string;
+    text: string;
+    decided: string | null;
+    createdAt: string;
+  }>;
+  /** null — no rooms in the reference: nothing to count. */
+  kpi: Array<{ id: string; label: string; value: string; sub: string }> | null;
+}
+
 export interface AgentsState extends View {
   user: UserRecord;
   hotel: HotelView | null;
-  approvals: ApprovalView[];
-  kpi: KpiView | null;
-  feed: FeedItem[];
+  desk: DeskView;
+
   /** The tab the page opens on (`?tab=`); «Сегодня» by default. */
   tab?: AgentTab;
   /** The latest draft of the reference from a card, while it is read or waits for the owner. */
@@ -224,13 +274,14 @@ const CATEGORIES: Record<string, string> = {
   site: 'Сайт',
   messenger: 'Мессенджер',
 };
-const FEED_KIND: Record<string, string> = {
-  urgent: 'Срочно',
-  summary: 'Сводка',
-  approval: 'Согласование',
-  reminder: 'Напоминание',
-  notice: 'В сводку',
-  answer: 'Ответ',
+/** The manager's words for an older Goldfish without the desk (`deskFromParts`). */
+const FEED_KIND: Record<string, { title: string; mark: string }> = {
+  urgent: { title: 'Срочно', mark: '🔴' },
+  summary: { title: 'Сводка', mark: '☀️' },
+  approval: { title: 'Согласование', mark: '✋' },
+  reminder: { title: 'Напоминание', mark: '⏰' },
+  notice: { title: 'В сводку', mark: 'ℹ️' },
+  answer: { title: 'Ответ', mark: '💬' },
 };
 /** The launch waves: what agents do in each (/help#waves). */
 const WAVES: Array<{ name: string; text: string }> = [
@@ -289,17 +340,21 @@ const duties = (n: number) => {
 
 // ---------------------------------------------------------------- the top of the page
 
-/**
- * What the owner sees first on every tab: who works, the wave, a pause, what waits for them and
- * whether Telegram is linked — each a link to the place where it is changed.
- */
 /** Whether a chat gets the manager's messages: a bot of the bots server or the Telegram of Goldfish. */
 function messengerLinked(h: HotelView, bots: BotsState | undefined): boolean {
   return h.telegramLinked || (!!bots && bots !== 'unavailable' && bots.links.length > 0);
 }
 
-function statusStrip(h: HotelView, approvals: ApprovalView[], bots: BotsState | undefined): string {
+/**
+ * What the owner sees first on every tab: who works, the wave, a pause, what waits for them and
+ * where the manager writes — each a link to the place where it is changed. The same line is in
+ * the side panel of the extension and in the bots' menu.
+ */
+export function statusStrip(s: Pick<AgentsState, 'hotel' | 'desk' | 'bots'>): string {
+  const h = s.hotel!;
+  const bots = s.bots;
   const set = h.settings;
+  const { status } = s.desk;
   const on = set.agents.filter((a) => a.enabled).length;
   const items: string[] = [];
   items.push(
@@ -315,8 +370,8 @@ function statusStrip(h: HotelView, approvals: ApprovalView[], bots: BotsState | 
     `<a class="status" href="${agentsHref('launch-title')}">Волна ${set.wave} из 3 · ${esc(WAVES[set.wave - 1]?.name.toLowerCase() ?? '')}</a>`,
   );
   items.push(
-    approvals.length
-      ? `<a class="status status--accent" href="${agentsHref('approvals-title')}">Ждут решения: ${approvals.length}</a>`
+    status.pending
+      ? `<a class="status ${status.urgent ? 'status--bad' : 'status--accent'}" href="${agentsHref('approvals-title')}">Ждут решения: ${status.pending}</a>`
       : `<a class="status" href="${agentsHref('approvals-title')}">Решений не ждут</a>`,
   );
   if (bots && bots !== 'unavailable') {
@@ -332,48 +387,125 @@ function statusStrip(h: HotelView, approvals: ApprovalView[], bots: BotsState | 
         ? `<a class="status" href="${agentsHref('telegram-title')}">Telegram привязан</a>`
         : `<a class="status status--warn" href="${agentsHref('telegram-title')}">Telegram не привязан</a>`,
     );
-  return `<ul class="statuses" aria-label="Состояние">${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+  return `<ul class="statuses" aria-label="Состояние" data-statuses>${items.map((x) => `<li>${x}</li>`).join('')}</ul>`;
 }
 
-function tabsNav(active: AgentTab, approvals: number): string {
+/** The count of decisions waiting, on the «Сегодня» tab; red when one of them is urgent. */
+export function tabCount(status: DeskView['status']): string {
+  return status.pending
+    ? ` <span class="tabs__count${status.urgent ? ' tabs__count--urgent' : ''}" aria-label="ждут решения: ${status.pending}">${status.pending}</span>`
+    : '';
+}
+
+function tabsNav(active: AgentTab, status: DeskView['status']): string {
   return `<nav class="tabs" aria-label="Разделы агентов">
 ${AGENT_TABS.map(
   (t) =>
-    `  <a class="tabs__tab" href="?tab=${t}" data-tab="${t}"${t === active ? ' aria-current="page"' : ''}>${TAB_TITLES[t]}${t === 'today' && approvals ? ` <span class="tabs__count" aria-label="ждут решения: ${approvals}">${approvals}</span>` : ''}</a>`,
+    `  <a class="tabs__tab" href="?tab=${t}" data-tab="${t}"${t === active ? ' aria-current="page"' : ''}>${TAB_TITLES[t]}${t === 'today' ? tabCount(status) : ''}</a>`,
 ).join('\n')}
 </nav>`;
 }
 
-function panel(tab: AgentTab, active: AgentTab, body: string): string {
-  return `<div class="tab-panel" id="tab-${tab}" data-panel="${tab}" role="region" aria-label="${TAB_TITLES[tab]}"${tab === active ? '' : ' hidden'}>
+function panel(tab: AgentTab, active: AgentTab, body: string, rev?: string): string {
+  return `<div class="tab-panel" id="tab-${tab}" data-panel="${tab}"${rev ? ` data-rev="${esc(rev)}"` : ''} role="region" aria-label="${TAB_TITLES[tab]}"${tab === active ? '' : ' hidden'}>
 ${body}
 </div>`;
 }
 
 // ---------------------------------------------------------------- «Сегодня»
 
-function kpiTiles(k: KpiView | null): string {
-  if (!k) return '';
-  const body = !k.units
-    ? `<p class="notice">Добавьте в эталон номера и их количество — тогда управляющий посчитает загрузку, ADR и RevPAR. <a href="${agentsHref('profile-title')}">Открыть эталон</a></p>`
-    : `<div class="tiles">${(
-        [
-          ['Загрузка вперёд', pct(k.next30.occupancy), 'на 30 дней'],
-          ['Загрузка', pct(k.past30.occupancy), 'за 30 дней'],
-          ['ADR', rub(k.past30.adr), 'средняя цена ночи'],
-          ['RevPAR', rub(k.past30.revpar), 'выручка на номер'],
-          ['Прямые брони', pct(k.past30.directShare), 'доля за 30 дней'],
-          ['Рейтинг', k.rating === null ? '—' : String(k.rating).replace('.', ','), 'на площадках'],
-          [
-            'Первый ответ',
-            k.responseMinutes === null ? '—' : `${k.responseMinutes} мин`,
-            'гостю, в среднем',
+const EXPIRE_AFTER_MS = 72 * 3_600_000;
+
+/**
+ * The desk from the separate answers of an older Goldfish (before GET …/hotel/manager): the page
+ * looks the same, only the decisions taken are not known.
+ */
+export function deskFromParts(
+  h: HotelView,
+  approvals: ApprovalView[],
+  k: KpiView | null,
+  feed: FeedItem[],
+): DeskView {
+  const titles = new Map(h.settings.agents.map((a) => [a.id, a.title]));
+  return {
+    rev: '',
+    status: {
+      agentsOn: h.settings.agents.filter((a) => a.enabled).length,
+      agentsTotal: h.settings.agents.length,
+      wave: h.settings.wave,
+      pending: approvals.length,
+      urgent: approvals.filter((a) => a.urgent).length,
+    },
+    approvals: approvals.map((a) => ({
+      id: a.id,
+      agent: a.agent,
+      agentTitle: titles.get(a.agent) ?? a.agent,
+      title: a.title,
+      reason: a.reason,
+      cost: a.cost,
+      urgent: a.urgent,
+      text: a.action.text ?? null,
+      editable: a.action.kind !== 'none',
+      createdAt: a.createdAt,
+      expiresAt: new Date(Date.parse(a.createdAt) + EXPIRE_AFTER_MS).toISOString(),
+    })),
+    decided: [],
+    feed: feed.map((f, i) => ({
+      id: String(i),
+      kind: f.kind,
+      kindTitle: FEED_KIND[f.kind]?.title ?? f.kind,
+      mark: FEED_KIND[f.kind]?.mark ?? '•',
+      text: f.text,
+      decided: null,
+      createdAt: f.createdAt,
+    })),
+    kpi:
+      !k || !k.units
+        ? null
+        : [
+            {
+              id: 'next30',
+              label: 'Загрузка вперёд',
+              value: pct(k.next30.occupancy),
+              sub: 'на 30 дней',
+            },
+            {
+              id: 'occupancy',
+              label: 'Загрузка',
+              value: pct(k.past30.occupancy),
+              sub: 'за 30 дней',
+            },
+            { id: 'adr', label: 'ADR', value: rub(k.past30.adr), sub: 'средняя цена ночи' },
+            { id: 'revpar', label: 'RevPAR', value: rub(k.past30.revpar), sub: 'выручка на номер' },
+            {
+              id: 'direct',
+              label: 'Прямые брони',
+              value: pct(k.past30.directShare),
+              sub: 'доля за 30 дней',
+            },
+            {
+              id: 'rating',
+              label: 'Рейтинг',
+              value: k.rating === null ? '—' : String(k.rating).replace('.', ','),
+              sub: 'на площадках',
+            },
+            {
+              id: 'response',
+              label: 'Первый ответ',
+              value: k.responseMinutes === null ? '—' : `${k.responseMinutes} мин`,
+              sub: 'гостю, в среднем',
+            },
           ],
-        ] as Array<[string, string, string]>
-      )
+  };
+}
+
+function kpiTiles(tiles: DeskView['kpi']): string {
+  const body = !tiles
+    ? `<p class="notice">Добавьте в эталон номера и их количество — тогда управляющий посчитает загрузку, ADR и RevPAR. <a href="${agentsHref('profile-title')}">Открыть эталон</a></p>`
+    : `<div class="tiles">${tiles
         .map(
-          ([t, v, sub]) =>
-            `<div class="tile"><span class="tile__label">${esc(t)}</span><b>${esc(v)}</b><span class="tile__sub">${esc(sub)}</span></div>`,
+          (t) =>
+            `<div class="tile"><span class="tile__label">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="tile__sub">${esc(t.sub)}</span></div>`,
         )
         .join('')}</div>`;
   return `<section aria-labelledby="kpi-title">
@@ -386,7 +518,9 @@ function kpiTiles(k: KpiView | null): string {
  * «Первые шаги»: what is left before the agents can work, each with a link to the place to do
  * it and to the guide. Hidden once everything is done.
  */
-function firstSteps(h: HotelView, bots: BotsState | undefined): string {
+function firstSteps(s: Pick<AgentsState, 'hotel' | 'bots'>): string {
+  const h = s.hotel!;
+  const bots = s.bots;
   const rooms = (h.profile.rooms as unknown[] | undefined) ?? [];
   const steps: Array<{ done: boolean; title: string; anchor: AgentAnchor; help: string }> = [
     {
@@ -437,44 +571,90 @@ ${steps
   </section>`;
 }
 
-function approvalsBlock(list: ApprovalView[], agents: Map<string, string>): string {
+/** «ещё 2 дня» until an approval expires without an answer. */
+function timeLeft(iso: string, now = Date.now()): string {
+  const hours = Math.max(0, Math.round((Date.parse(iso) - now) / 3_600_000));
+  if (hours < 1) return 'истекает сейчас';
+  if (hours < 24) return `ещё ${hours} ч`;
+  const days = Math.round(hours / 24);
+  return `ещё ${days} ${days === 1 ? 'день' : days < 5 ? 'дня' : 'дней'}`;
+}
+
+function approvalsBlock(list: DeskView['approvals']): string {
   if (!list.length)
-    return `<div class="empty-state"><span class="empty-state__mark" aria-hidden="true">✓</span><div><b>Ничего не ждёт вашего решения</b><p class="hint">Когда агенту понадобится ваше «да», карточка появится здесь и в Telegram.</p></div></div>`;
+    return `<div class="empty-state"><span class="empty-state__mark" aria-hidden="true">✓</span><div><b>Ничего не ждёт вашего решения</b><p class="hint">Когда агенту понадобится ваше «да», карточка появится здесь, в расширении и в мессенджере — решите там, где удобнее.</p></div></div>`;
   return list
     .map(
-      (a) => `<article class="approval${a.urgent ? ' approval--urgent' : ''}">
-  <div class="approval__head"><span class="agent-icon agent-icon--sm" aria-hidden="true">${icon(a.agent)}</span><p class="approval__agent">${esc(agents.get(a.agent) ?? a.agent)} · ${esc(when(a.createdAt))}</p>${a.urgent ? '<span class="chip chip--bad">срочно</span>' : ''}</div>
+      (
+        a,
+      ) => `<article class="approval${a.urgent ? ' approval--urgent' : ''}" data-approval="${esc(a.id)}">
+  <div class="approval__head"><span class="agent-icon agent-icon--sm" aria-hidden="true">${icon(a.agent)}</span><p class="approval__agent">${esc(a.agentTitle)} · ${esc(when(a.createdAt))}</p>${a.urgent ? '<span class="chip chip--bad">срочно</span>' : ''}</div>
   <h3>${esc(a.title)}</h3>
-  <p class="approval__reason">${esc(a.reason)}</p>
-  ${a.cost ? `<p class="approval__cost">Сколько стоит: <b>${esc(a.cost)}</b></p>` : ''}
-  ${a.action.text ? `<pre class="approval__text">${esc(a.action.text)}</pre>` : ''}
-  <div class="row">
+  <p class="approval__reason"><span class="approval__label">Почему:</span> ${esc(a.reason)}</p>
+  ${a.cost ? `<p class="approval__cost"><span class="approval__label">Сколько стоит:</span> <b>${esc(a.cost)}</b></p>` : ''}
+  ${a.text ? `<pre class="approval__text">${esc(a.text)}</pre>` : ''}
+  <div class="row approval__actions">
     <button class="btn btn--accent btn--sm" type="button" data-act="approve" data-id="${esc(a.id)}">Согласовать</button>
-    ${a.action.kind === 'none' ? '' : `<button class="btn btn--ghost btn--sm" type="button" data-act="edit-open" data-id="${esc(a.id)}">Изменить</button>`}
-    <button class="btn btn--ghost btn--sm" type="button" data-act="reject" data-id="${esc(a.id)}">Отклонить</button>
+    ${a.editable ? `<button class="btn btn--ghost btn--sm" type="button" data-act="edit-open" data-id="${esc(a.id)}">Изменить</button>` : ''}
+    <button class="btn btn--ghost btn--sm btn--danger" type="button" data-act="reject" data-id="${esc(a.id)}">Отклонить</button>
+    <span class="approval__left" title="Без ответа согласование истечёт ${esc(when(a.expiresAt))}">${esc(timeLeft(a.expiresAt))}</span>
   </div>
   ${
-    a.action.kind === 'none'
-      ? ''
-      : `<form class="edit" data-form="edit" data-id="${esc(a.id)}" hidden>
-    <textarea name="text" rows="4" aria-label="Новый текст">${esc(a.action.text ?? '')}</textarea>
-    <button class="btn btn--accent btn--sm" type="submit">Изменить и согласовать</button>
+    a.editable
+      ? `<form class="edit" data-form="edit" data-id="${esc(a.id)}" hidden>
+    <textarea name="text" rows="4" aria-label="Новый текст">${esc(a.text ?? '')}</textarea>
+    <span class="row"><button class="btn btn--accent btn--sm" type="submit">Изменить и согласовать</button><button class="btn btn--ghost btn--sm" type="button" data-act="edit-open" data-id="${esc(a.id)}">Отмена</button></span>
   </form>`
+      : ''
   }
 </article>`,
     )
     .join('');
 }
 
-function feedBlock(feed: FeedItem[]): string {
+/** What was decided in the last week and where: on the site, in the extension, in a messenger. */
+function decidedBlock(list: DeskView['decided']): string {
+  if (!list.length) return '';
+  return `<details class="decided" open>
+  <summary>Решено недавно</summary>
+  <ul class="decided__list">${list
+    .map(
+      (d) =>
+        `<li class="decided__item decided__item--${d.status}"><span class="decided__mark" aria-hidden="true">${esc(d.mark)}</span><span><b>${esc(d.title)}</b><span class="hint">${esc(d.agentTitle)} · ${esc(d.outcome)} · ${esc(when(d.decidedAt))}${d.comment ? ` · ${esc(d.comment)}` : ''}</span></span></li>`,
+    )
+    .join('')}</ul>
+</details>`;
+}
+
+function feedBlock(feed: DeskView['feed']): string {
   if (!feed.length)
-    return `<p class="hint">Сообщений пока нет. Утренняя сводка появится здесь и в Telegram.</p>`;
+    return `<p class="hint">Сообщений пока нет. Утренняя сводка появится здесь, в расширении и в мессенджере.</p>`;
   return `<ul class="feed">${feed
     .map(
       (f) =>
-        `<li><span class="feed__meta"><span class="chip${f.kind === 'urgent' ? ' chip--bad' : ''}">${esc(FEED_KIND[f.kind] ?? f.kind)}</span> ${esc(when(f.createdAt))}</span><pre>${esc(f.text)}</pre></li>`,
+        `<li class="feed__item feed__item--${esc(f.kind)}"><span class="feed__meta"><span class="chip chip--kind chip--${esc(f.kind)}">${esc(f.mark)} ${esc(f.kindTitle)}</span> ${esc(when(f.createdAt))}${f.decided ? ` <span class="chip chip--ok">${esc(f.decided)}</span>` : ''}</span><pre>${esc(f.text)}</pre></li>`,
     )
     .join('')}</ul>`;
+}
+
+/**
+ * The «Сегодня» tab: what is left to set up, what waits for the owner, what was decided, the
+ * numbers and the manager's messages. app.js asks for it again (GET /api/agents/today) and puts
+ * it in place when the desk changed — a decision in a messenger or the extension shows here.
+ */
+export function todayPanel(s: Pick<AgentsState, 'hotel' | 'desk' | 'bots'>): string {
+  const d = s.desk;
+  return `  ${firstSteps(s)}
+  <section class="card" aria-labelledby="approvals-title">
+    <div class="card__head"><h2 id="approvals-title">Ждут решения${d.approvals.length ? ` · ${d.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
+    ${approvalsBlock(d.approvals)}
+    ${decidedBlock(d.decided)}
+  </section>
+  ${kpiTiles(d.kpi)}
+  <section class="card" aria-labelledby="feed-title">
+    <div class="card__head"><h2 id="feed-title">Сообщения управляющего</h2>${helpLink('tg-commands', 'Что можно спросить?')}</div>
+    ${feedBlock(d.feed)}
+  </section>`;
 }
 
 // ---------------------------------------------------------------- «Команда»
@@ -1228,7 +1408,7 @@ function ownerForm(h: HotelView): string {
 
 function telegramBlock(h: HotelView): string {
   if (h.telegramBot === false)
-    return `<p class="hint">Telegram-бот ещё не настроен на сервере. Пока сообщения управляющего — на вкладке «Сегодня».</p>`;
+    return `<p class="hint">Telegram-бот ещё не настроен на сервере. Пока сообщения управляющего — на вкладке «Сегодня» и в расширении.</p>`;
   return `<div class="tg-link${h.telegramLinked ? ' tg-link--on' : ''}">
   <p>${h.telegramLinked ? '<b>Telegram привязан</b> — сводки, срочное и согласования приходят туда.' : '<b>Telegram не привязан.</b> Привяжите — управляющий будет присылать сводку, срочное и кнопки согласований.'}</p>
   <button class="btn ${h.telegramLinked ? 'btn--ghost' : 'btn--accent'} btn--sm" type="button" data-act="telegram">${h.telegramLinked ? 'Привязать другой чат' : 'Привязать Telegram'}</button>
@@ -1278,21 +1458,11 @@ export function renderAgents(s: AgentsState): string {
     );
   }
   const tab = s.tab ?? 'today';
-  const agents = new Map(h.settings.agents.map((a) => [a.id, a.title]));
   const name = String(h.profile.name ?? '');
   const guest = h.settings.platforms
     .filter((p) => p.category === 'guest')
     .map((p) => ({ id: p.id, title: p.title }));
-  const today = `  ${firstSteps(h, s.bots)}
-  <section class="card" aria-labelledby="approvals-title">
-    <div class="card__head"><h2 id="approvals-title">Ждут решения${s.approvals.length ? ` · ${s.approvals.length}` : ''}</h2>${helpLink('decide', 'Как решать?')}</div>
-    ${approvalsBlock(s.approvals, agents)}
-  </section>
-  ${kpiTiles(s.kpi)}
-  <section class="card" aria-labelledby="feed-title">
-    <div class="card__head"><h2 id="feed-title">Сообщения управляющего</h2>${helpLink('tg-commands', 'Что можно спросить?')}</div>
-    ${feedBlock(s.feed)}
-  </section>`;
+  const today = todayPanel(s);
   const team = `  ${launchBlock(h)}
   ${teamBlock(h)}`;
   const property = `  <section class="card" aria-labelledby="profile-title">
@@ -1337,12 +1507,12 @@ export function renderAgents(s: AgentsState): string {
     <div class="hero__text">
       <p class="eyebrow"><a href="/">Кабинет</a> · агенты объекта</p>
       <h1>${name ? esc(name) : 'Ваш объект'}</h1>
-      ${statusStrip(h, s.approvals, s.bots)}
+      ${statusStrip(s)}
     </div>
   </section>
   ${s.error ? `<p class="notice" role="status">${esc(s.error)}</p>` : ''}
-  ${tabsNav(tab, s.approvals.length)}
-  ${panel('today', tab, today)}
+  ${tabsNav(tab, s.desk.status)}
+  ${panel('today', tab, today, s.desk.rev)}
   ${panel('team', tab, team)}
   ${panel('property', tab, property)}
   ${panel('settings', tab, settings)}
