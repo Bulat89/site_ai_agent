@@ -138,6 +138,18 @@ describe('Yandex ID sign-in', () => {
     await expect(signIn(t)).rejects.toThrow('/?login=error');
   });
 
+  it('waits out Yandex throttling the code exchange once', async () => {
+    t = await startApp();
+    t.fakes.tokenExchangeThrottled = 1;
+    const cookies = await signIn(t);
+    expect(Object.keys(cookies)).toEqual(['__Host-gf_session']);
+    expect(t.fakes.calls.filter((c) => c === 'POST oauth.yandex.test/token')).toHaveLength(2);
+
+    // Throttling that goes on is still an error.
+    t.fakes.tokenExchangeThrottled = 10;
+    await expect(signIn(t)).rejects.toThrow('/?login=error');
+  });
+
   it('logs out only from its own pages', async () => {
     t = await startApp();
     const cookies = await signIn(t);

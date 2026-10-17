@@ -25,6 +25,12 @@ const InfoResponse = z.object({
 });
 
 const TIMEOUT_MS = 10_000;
+/**
+ * Pauses before the code is exchanged again. Yandex once answered the exchange 429
+ * «proxy.api.error» and the person saw «login_error»; a refused request does not spend the code.
+ */
+const RETRY_DELAYS_MS = [1_000];
+const retryable = (status: number) => status === 429 || status >= 500;
 
 /**
  * Yandex ID sign-in: authorization code flow with PKCE. The access token is used once to read
@@ -41,6 +47,7 @@ export class YandexAuth {
       | 'YANDEX_LOGIN_URL'
     >,
     private readonly fetchFn: typeof fetch = fetch,
+    private readonly retryDelaysMs: readonly number[] = RETRY_DELAYS_MS,
   ) {}
 
   get redirectUri(): string {
@@ -60,20 +67,26 @@ export class YandexAuth {
     return url.toString();
   }
 
-  /** Exchanges the authorization code for an access token. */
+  /** Exchanges the authorization code for an access token; throttling is waited out once. */
   async exchange(code: string, codeVerifier: string): Promise<string> {
-    const res = await this.fetchFn(new URL('/token', this.config.YANDEX_OAUTH_URL), {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: this.config.YANDEX_CLIENT_ID,
-        client_secret: this.config.YANDEX_CLIENT_SECRET,
-        code_verifier: codeVerifier,
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    let res: Response;
+    for (let attempt = 0; ; attempt++) {
+      res = await this.fetchFn(new URL('/token', this.config.YANDEX_OAUTH_URL), {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: this.config.YANDEX_CLIENT_ID,
+          client_secret: this.config.YANDEX_CLIENT_SECRET,
+          code_verifier: codeVerifier,
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (!retryable(res.status) || attempt >= this.retryDelaysMs.length) break;
+      await res.body?.cancel().catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelaysMs[attempt]));
+    }
     const body: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const err = ErrorResponse.safeParse(body);
