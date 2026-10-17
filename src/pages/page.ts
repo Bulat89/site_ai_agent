@@ -37,6 +37,7 @@ const ANCHOR_TAB = {
   'kpi-title': 'today',
   'feed-title': 'today',
   'launch-title': 'team',
+  'autonomy-title': 'team',
   'team-title': 'team',
   'profile-title': 'property',
   'listings-title': 'property',

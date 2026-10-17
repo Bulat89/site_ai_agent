@@ -293,6 +293,30 @@ export class Fakes {
     hookConfigured: false,
     telegramBot: true,
     settings: {
+      autonomy: 4 as number | undefined,
+      autonomyLevels: [
+        [
+          'Ручное управление',
+          'управляющий ничего не запускает сам — всё начинаете и выполняете вы',
+        ],
+        [
+          'Задачи с подтверждением',
+          'каждую задачу сначала согласуете вы, дальше управляющий выполняет её сам',
+        ],
+        [
+          'Контролируемая автономность',
+          'анализ сам до 100 запросов к LLM, ответы гостям и изменения — после вашего согласования',
+        ],
+        [
+          'Полная автономность',
+          'стандартное делает сам, нестандартное передаёт вам с рекомендацией',
+        ],
+      ].map(([title, short], i) => ({
+        level: i + 1,
+        title: title!,
+        short: short!,
+        rules: [`Правило уровня ${i + 1}.`],
+      })) as Array<{ level: number; title: string; short: string; rules: string[] }> | undefined,
       wave: 1,
       pause: null,
       owner: { quietFrom: '22:00', quietTo: '09:00', urgentPerDay: 5, summaryTime: '09:00' },

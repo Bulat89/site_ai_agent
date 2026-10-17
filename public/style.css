@@ -1287,6 +1287,26 @@ h1 {
   background: var(--ok-soft);
   color: var(--ok);
 }
+.autonomy {
+  margin-top: 22px;
+}
+.autonomy h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+@media (min-width: 820px) {
+  .waves--autonomy {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1180px) {
+  .waves--autonomy {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.autonomy__rules {
+  margin: 12px 0 0;
+}
 .pause {
   display: flex;
   flex-wrap: wrap;

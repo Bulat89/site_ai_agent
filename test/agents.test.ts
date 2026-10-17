@@ -258,6 +258,43 @@ describe('agents page', () => {
     );
   });
 
+  it('the autonomy of the manager: the level in the strip, the four levels to choose, escalations', async () => {
+    t = await startApp();
+    const cookies = await signIn(t);
+    const levels = t.fakes.hotel.settings.autonomyLevels;
+    // An older Goldfish says nothing about autonomy: nothing is shown.
+    Object.assign(t.fakes.hotel.settings, { autonomy: undefined, autonomyLevels: undefined });
+    let html = (await t.app.inject({ url: '/agents?tab=team', cookies })).body;
+    expect(html).not.toContain('autonomy-title');
+    Object.assign(t.fakes.hotel.settings, { autonomy: 3, autonomyLevels: levels });
+    (t.fakes.approvals[0] as Record<string, unknown>).escalation = {
+      what: 'Овербукинг «Люкс» на 22.10–23.10',
+      consequences: 'Гость останется без номера',
+      recommendation: 'Связаться с гостем',
+      held: 'сообщения гостям Анна, Пётр',
+    };
+    html = (await t.app.inject({ url: '/agents?tab=team', cookies })).body;
+    const strip = /<ul class="statuses"[^>]*>(.*?)<\/ul>/s.exec(html)![1]!;
+    expect(strip).toContain('Уровень 3 из 4 · контролируемая автономность');
+    expect(html).toContain('<h3 id="autonomy-title">Уровень автономности управляющего</h3>');
+    expect(html).toContain('<li>Правило уровня 3.</li>');
+    expect(html).not.toContain('data-act="autonomy" data-level="3"');
+    const choose =
+      /data-act="autonomy" data-level="1" data-title="([^"]*)" data-confirm="([^"]*)"/.exec(html)!;
+    expect(choose[1]).toBe('Ручное управление');
+    expect(choose[2]).toContain('Уровень автономности 1 — «Ручное управление»?');
+    expect(choose[2]).toContain('• Правило уровня 1.');
+    html = (await t.app.inject({ url: '/agents?tab=today', cookies })).body;
+    expect(html).toContain('<span class="approval__label">Что произошло:</span> Овербукинг');
+    expect(html).toContain(
+      '<span class="approval__label">Чем грозит:</span> Гость останется без номера',
+    );
+    expect(html).toContain(
+      '<span class="approval__label">До вашего решения приостановлено:</span> сообщения гостям Анна, Пётр',
+    );
+    expect(html).not.toContain('<span class="approval__label">Почему:</span>');
+  });
+
   it('the reference is edited in fields, not JSON; what is not shown is kept', async () => {
     t = await startApp();
     const cookies = await signIn(t);

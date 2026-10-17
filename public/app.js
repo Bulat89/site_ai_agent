@@ -382,9 +382,30 @@ document.querySelectorAll('[data-act="wave"]').forEach((button) =>
   ),
 );
 
+// The manager's autonomy: the owner confirms the level with what the manager does on it.
+document.querySelectorAll('[data-act="autonomy"]').forEach((button) =>
+  button.addEventListener(
+    'click',
+    guarded(async () => {
+      if (!(await askConfirm(button.getAttribute('data-confirm')))) return;
+      button.disabled = true;
+      const level = Number(button.getAttribute('data-level'));
+      await changeSettings(
+        [{ op: 'autonomy', level }],
+        `Уровень автономности ${level} «${button.getAttribute('data-title')}»: управляющий работает по новым правилам.`,
+      );
+    }),
+  ),
+);
+
 // What runs after a run status, in plain words (the guide explains every status).
 const STATUS_HINTS = [
   [/^на согласовании/, 'Подтвердите его на вкладке «Сегодня» → «Ждут решения» или в Telegram.'],
+  [
+    /^задача на согласовании/,
+    'Уровень автономности 2: согласуйте задачу на вкладке «Сегодня» — дальше агент выполнит её сам.',
+  ],
+  [/^не запущено: уровень автономности/, 'Сменить уровень: «Команда» → «Режим работы».'],
   [/расширение ещё ни разу/, 'Установите и подключите расширение — шаги в кабинете.'],
   [
     /нет подключённых систем/,
